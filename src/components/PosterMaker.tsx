@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { ImageIcon, Loader2, Download, Send, Layout, Maximize } from 'lucide-react';
+import { ImageIcon, Loader2, Download, Send, Layout, Maximize, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +10,7 @@ export default function PosterMaker() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '9:16' | '16:9' | '4:3'>('1:1');
+  const [animationType, setAnimationType] = useState<'none' | 'pulse' | 'float' | 'glow' | 'slide'>('none');
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<'poster' | 'logo'>('poster');
@@ -124,6 +125,29 @@ export default function PosterMaker() {
               </div>
             )}
 
+            <div>
+              <label className="block text-sm font-bold mb-4 uppercase tracking-wider text-neutral-500 flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                Subtle Animation
+              </label>
+              <div className="grid grid-cols-5 gap-2">
+                {(['none', 'pulse', 'float', 'glow', 'slide'] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setAnimationType(type)}
+                    className={cn(
+                      "p-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                      animationType === type
+                        ? "bg-red-600 border-red-500 text-white"
+                        : "bg-black/40 border-white/5 text-neutral-500 hover:border-white/20"
+                    )}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
               onClick={generatePoster}
               disabled={isGenerating || !prompt.trim()}
@@ -164,7 +188,20 @@ export default function PosterMaker() {
                 <motion.div
                   key="image"
                   initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
+                  animate={{ 
+                    opacity: 1, 
+                    scale: animationType === 'pulse' ? [1, 1.02, 1] : 1,
+                    y: animationType === 'float' ? [0, -10, 0] : 0,
+                    x: animationType === 'slide' ? [-5, 5, -5] : 0,
+                    filter: animationType === 'glow' ? ["brightness(1)", "brightness(1.2)", "brightness(1)"] : "brightness(1)"
+                  }}
+                  transition={{
+                    opacity: { duration: 0.5 },
+                    scale: { duration: 3, repeat: Infinity, ease: "easeInOut" },
+                    y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
+                    x: { duration: 5, repeat: Infinity, ease: "easeInOut" },
+                    filter: { duration: 2, repeat: Infinity, ease: "easeInOut" }
+                  }}
                   exit={{ opacity: 0, scale: 1.05 }}
                   className="w-full h-full relative"
                 >

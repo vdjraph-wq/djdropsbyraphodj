@@ -8,15 +8,21 @@ import { useNavigate } from 'react-router-dom';
 export default function CreateDrop() {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [voice, setVoice] = useState<string>('Kore');
+  const [voice, setVoice] = useState<string>('RAPHO');
   const [customVoices, setCustomVoices] = useState<{name: string, description: string, audioData?: string}[]>([
     { name: 'RAPHO', description: 'Deep male voice, authoritative, similar to Wigman style, high energy' }
   ]);
   const [mode, setMode] = useState<'standard' | 'cloning'>('standard');
   const [voiceName, setVoiceName] = useState('');
   const [cloningPrompt, setCloningPrompt] = useState('Deep, energetic, Jamaican style');
+  const [audioQuality, setAudioQuality] = useState<'standard' | 'studio'>('standard');
+  const [sampleRate, setSampleRate] = useState<number>(24000);
   const [uploadedAudio, setUploadedAudio] = useState<string | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{text: string, type: 'error' | 'success' | 'info'} | null>(null);
   const [lastGeneratedAudio, setLastGeneratedAudio] = useState<Blob | null>(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [effects, setEffects] = useState({
     reverb: false,
     echo: false,
@@ -56,8 +62,13 @@ export default function CreateDrop() {
 
       mediaRecorder.start();
       setIsRecording(true);
+      setRecordingTime(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
     } catch (err) {
       console.error("Error accessing microphone:", err);
+      setStatusMessage({ text: "Microphone access denied. Please check permissions.", type: 'error' });
     }
   };
 
@@ -65,12 +76,17 @@ export default function CreateDrop() {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
     }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setUploadedFileName(file.name);
       const reader = new FileReader();
       reader.onloadend = () => {
         setUploadedAudio(reader.result as string);
@@ -90,7 +106,125 @@ export default function CreateDrop() {
     setVoice(name);
     setMode('standard');
     setUploadedAudio(null);
+    setUploadedFileName(null);
     setVoiceName('');
+    setCloningPrompt('');
+    setStatusMessage({ text: `Voice "${name}" cloned successfully!`, type: 'success' });
+    setTimeout(() => setStatusMessage(null), 3000);
+  };
+
+  const deleteVoice = (name: string) => {
+    if (name === 'RAPHO') return;
+    setCustomVoices(prev => prev.filter(v => v.name !== name));
+    if (voice === name) setVoice('RAPHO');
+  };
+
+  const clearReference = () => {
+    setUploadedAudio(null);
+    setUploadedFileName(null);
+    if (isRecording) stopRecording();
+  };
+
+  const playReference = () => {
+    if (!uploadedAudio) return;
+    const audio = new Audio(uploadedAudio);
+    audio.play().catch(e => console.error("Reference playback failed:", e));
+  };
+
+  const [isPreviewing, setIsPreviewing] = useState<string | null>(null);
+
+  const callAiWithRetry = async (fn: () => Promise<any>, maxRetries = 2) => {
+    let lastError: any;
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+        const isRateLimit = errorStr.includes("RESOURCE_EXHAUSTED") || 
+                           errorStr.includes("429") || 
+                           error?.status === 429 ||
+                           error?.code === 429;
+        
+        if (isRateLimit && i < maxRetries) {
+          // Wait before retrying: 2s, 4s
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, i + 1) * 1000));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError;
+  };
+
+  const previewVoice = async (vName: string, description: string, audioData?: string) => {
+    setIsPreviewing(vName);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      let finalDescription = description;
+
+      if (audioData) {
+        try {
+          const analysisResponse = await callAiWithRetry(() => ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: [
+              {
+                inlineData: {
+                  data: audioData.split(',')[1],
+                  mimeType: audioData.split(';')[0].split(':')[1]
+                }
+              },
+              { text: `The user wants to clone a voice with this description: "${description}". Analyze the provided audio and combine its technical characteristics (tone, pitch, energy, accent) with the user's description to create a final technical profile for a TTS engine. Keep it under 60 words.` }
+            ]
+          }));
+          if (analysisResponse.text) {
+            finalDescription = analysisResponse.text;
+          }
+        } catch (e) {
+          console.error("Analysis error during preview:", e);
+        }
+      }
+
+      const response = await callAiWithRetry(() => ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ 
+          parts: [{ 
+            text: `You are a voice cloning engine. Clone the following voice style: ${finalDescription}. Say exactly: "This is your ${vName} voice preview."` 
+          }] 
+        }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: (['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'].includes(vName) ? vName : 'Kore') as any },
+            },
+          },
+        },
+      }));
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        const binary = atob(base64Audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const wavBlob = createWavBlob(bytes.buffer, sampleRate);
+        const url = URL.createObjectURL(wavBlob);
+        const audio = new Audio(url);
+        audio.play().catch(e => console.error("Audio playback failed:", e));
+      }
+    } catch (error: any) {
+      console.error("Preview error:", error);
+      const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+      if (errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("429")) {
+        setStatusMessage({ text: "AI is busy. Retrying automatically...", type: 'info' });
+      } else {
+        setStatusMessage({ text: "Error during preview. Please try again.", type: 'error' });
+      }
+    } finally {
+      setIsPreviewing(null);
+    }
   };
 
   const generateDrop = async () => {
@@ -112,7 +246,7 @@ export default function CreateDrop() {
       const audioData = selectedCustomVoice?.audioData || uploadedAudio;
       if (audioData) {
         try {
-          const analysisResponse = await ai.models.generateContent({
+          const analysisResponse = await callAiWithRetry(() => ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: [
               {
@@ -123,7 +257,7 @@ export default function CreateDrop() {
               },
               { text: `The user wants to clone a voice with this description: "${voiceDescription}". Analyze the provided audio and combine its technical characteristics (tone, pitch, energy, accent) with the user's description to create a final technical profile for a TTS engine. Keep it under 60 words.` }
             ]
-          });
+          }));
           if (analysisResponse.text) {
             voiceDescription = analysisResponse.text;
           }
@@ -139,9 +273,13 @@ export default function CreateDrop() {
         systemInstruction = `Generate a professional DJ drop script and speak it.`;
       }
 
+      if (audioQuality === 'studio') {
+        systemInstruction += " Use a professional studio recording style with high clarity, presence, and perfect articulation. The output should sound like it was recorded in a high-end vocal booth.";
+      }
+
       contents.push({ text: `${systemInstruction} Script: ${prompt}` });
 
-      const response = await ai.models.generateContent({
+      const response = await callAiWithRetry(() => ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: contents }],
         config: {
@@ -152,7 +290,7 @@ export default function CreateDrop() {
             },
           },
         },
-      });
+      }));
 
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
@@ -163,13 +301,19 @@ export default function CreateDrop() {
         }
         
         // Create WAV blob for downloading
-        const wavBlob = createWavBlob(bytes.buffer, 24000);
+        const wavBlob = createWavBlob(bytes.buffer, sampleRate);
         setLastGeneratedAudio(wavBlob);
         
         playPcm(bytes.buffer);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating drop:", error);
+      const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+      if (errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("429")) {
+        setStatusMessage({ text: "AI is busy. Retrying automatically...", type: 'info' });
+      } else {
+        setStatusMessage({ text: "Error generating drop. Please try again.", type: 'error' });
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -211,7 +355,7 @@ export default function CreateDrop() {
     for (let i = 0; i < pcmData.length; i++) {
       floatData[i] = pcmData[i] / 32768;
     }
-    const audioBuffer = audioCtx.createBuffer(1, floatData.length, 24000);
+    const audioBuffer = audioCtx.createBuffer(1, floatData.length, sampleRate);
     audioBuffer.getChannelData(0).set(floatData);
     
     const source = audioCtx.createBufferSource();
@@ -384,53 +528,40 @@ export default function CreateDrop() {
               >
                 <div>
                   <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Standard AI Voices</label>
-                  <div className="grid grid-cols-1 gap-2 mb-6">
+                  <div className="grid grid-cols-1 gap-2">
                     {(['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'] as const).map((v) => (
-                      <button
+                      <div
                         key={v}
-                        onClick={() => setVoice(v)}
                         className={cn(
-                          "px-4 py-3 rounded-xl text-left transition-all border",
+                          "px-4 py-3 rounded-xl transition-all border flex items-center justify-between",
                           voice === v 
                             ? "bg-red-600 border-red-500 text-white font-bold" 
                             : "bg-black/40 border-white/5 text-neutral-400 hover:border-white/20"
                         )}
                       >
-                        {v} {v === 'Kore' && '(Recommended)'}
-                      </button>
+                        <button 
+                          onClick={() => setVoice(v)}
+                          className="flex-1 text-left"
+                        >
+                          {v} {v === 'Kore' && '(Recommended)'}
+                        </button>
+                        <button
+                          onClick={() => previewVoice(v, `Standard voice ${v}`)}
+                          disabled={isPreviewing === v}
+                          className={cn(
+                            "p-2 rounded-lg transition-all",
+                            voice === v ? "hover:bg-white/10" : "hover:bg-red-600/10"
+                          )}
+                        >
+                          {isPreviewing === v ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Volume2 className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
                     ))}
                   </div>
-
-                  {customVoices.length > 0 && (
-                    <div>
-                      <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Your Cloned Voices</label>
-                      <div className="grid grid-cols-1 gap-2">
-                        {customVoices.map((v) => (
-                          <button
-                            key={v.name}
-                            onClick={() => setVoice(v.name)}
-                            className={cn(
-                              "px-4 py-3 rounded-xl text-left transition-all border group relative",
-                              voice === v.name 
-                                ? "bg-red-600 border-red-500 text-white font-bold" 
-                                : "bg-black/40 border-white/5 text-neutral-400 hover:border-white/20"
-                            )}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span>{v.name}</span>
-                              <Wand2 className="w-3 h-3 opacity-50" />
-                            </div>
-                            <p className={cn(
-                              "text-[10px] mt-1 font-normal truncate",
-                              voice === v.name ? "text-red-100" : "text-neutral-500"
-                            )}>
-                              {v.description}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </motion.div>
             ) : (
@@ -454,11 +585,14 @@ export default function CreateDrop() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Voice Description</label>
+                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">
+                      Voice Description
+                      <span className="ml-2 text-[10px] font-normal normal-case text-neutral-600">(Guides the AI's tone and style)</span>
+                    </label>
                     <textarea
                       value={cloningPrompt}
                       onChange={(e) => setCloningPrompt(e.target.value)}
-                      placeholder="Describe the voice style to clone..."
+                      placeholder="Describe the voice style... (e.g. 'Deep, raspy, high-energy Jamaican MC with a slight echo')"
                       className="w-full h-24 bg-black/40 border border-white/10 rounded-2xl p-4 text-sm focus:outline-none focus:border-red-600 transition-colors resize-none"
                     />
                   </div>
@@ -489,34 +623,74 @@ export default function CreateDrop() {
                       <button
                         onClick={isRecording ? stopRecording : startRecording}
                         className={cn(
-                          "py-4 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all",
+                          "py-4 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all relative overflow-hidden",
                           isRecording 
-                            ? "bg-red-600/20 border-red-600 text-red-500 animate-pulse" 
+                            ? "bg-red-600/20 border-red-600 text-red-500" 
                             : "bg-black/40 border-white/10 text-neutral-500 hover:border-white/20"
                         )}
                       >
-                        <Mic className="w-5 h-5" />
-                        <span className="text-[10px] font-black uppercase">
-                          {isRecording ? 'Stop Recording' : 'Record Live'}
+                        {isRecording && (
+                          <motion.div 
+                            className="absolute inset-0 bg-red-600/10"
+                            animate={{ opacity: [0.2, 0.5, 0.2] }}
+                            transition={{ duration: 1, repeat: Infinity }}
+                          />
+                        )}
+                        <Mic className={cn("w-5 h-5 relative z-10", isRecording && "animate-pulse")} />
+                        <span className="text-[10px] font-black uppercase relative z-10">
+                          {isRecording ? `Recording (${recordingTime}s)` : 'Record Live'}
                         </span>
                       </button>
                     </div>
                     {uploadedAudio && !isRecording && (
-                      <div className="mt-2 flex items-center justify-center gap-2 text-green-500">
-                        <CheckCircle className="w-4 h-4" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Reference Ready</span>
+                      <div className="mt-2 flex items-center justify-center gap-2">
+                        <div className="flex items-center gap-2 text-green-500">
+                          <CheckCircle className="w-4 h-4" />
+                          <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[150px]">
+                            {uploadedFileName || 'Reference Ready'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={playReference}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-all"
+                            title="Play Reference"
+                          >
+                            <Volume2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={clearReference}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-red-600/10 text-neutral-400 hover:text-red-500 transition-all"
+                            title="Clear Reference"
+                          >
+                            <Plus className="w-3 h-3 rotate-45" />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  <button
-                    onClick={addClonedVoice}
-                    disabled={!uploadedAudio && !cloningPrompt}
-                    className="w-full bg-white text-black py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-neutral-200 transition-all disabled:opacity-50"
-                  >
-                    <Plus className="w-3 h-3" />
-                    Save Cloned Voice
-                  </button>
+                  <div className="grid grid-cols-4 gap-2">
+                    <button
+                      onClick={addClonedVoice}
+                      disabled={!uploadedAudio && !cloningPrompt}
+                      className="col-span-3 bg-white text-black py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-neutral-200 transition-all disabled:opacity-50"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Save Cloned Voice
+                    </button>
+                    <button
+                      onClick={() => previewVoice(voiceName || "New Clone", cloningPrompt, uploadedAudio || undefined)}
+                      disabled={isPreviewing !== null || (!uploadedAudio && !cloningPrompt)}
+                      className="bg-red-600 text-white py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-red-700 transition-all disabled:opacity-50"
+                    >
+                      {isPreviewing === (voiceName || "New Clone") ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Volume2 className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
 
                   <p className="text-[10px] text-neutral-500 italic">
                     Example: "Deep, raspy, high-energy Jamaican MC"
@@ -525,6 +699,124 @@ export default function CreateDrop() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Always show custom voices if they exist */}
+          {customVoices.length > 0 && (
+            <div className="pt-6 border-t border-white/5">
+              <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Your Cloned Voices</label>
+              <div className="grid grid-cols-1 gap-2">
+                {customVoices.map((v) => (
+                  <div
+                    key={v.name}
+                    className={cn(
+                      "px-4 py-3 rounded-xl transition-all border group relative flex items-center justify-between",
+                      voice === v.name 
+                        ? "bg-red-600 border-red-500 text-white font-bold" 
+                        : "bg-black/40 border-white/5 text-neutral-400 hover:border-white/20"
+                    )}
+                  >
+                    <button
+                      onClick={() => setVoice(v.name)}
+                      className="flex-1 text-left"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{v.name}</span>
+                        {v.name !== 'RAPHO' && <Wand2 className="w-3 h-3 opacity-50" />}
+                      </div>
+                      <p className={cn(
+                        "text-[10px] mt-1 font-normal truncate",
+                        voice === v.name ? "text-red-100" : "text-neutral-500"
+                      )}>
+                        {v.description}
+                      </p>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          previewVoice(v.name, v.description, v.audioData);
+                        }}
+                        disabled={isPreviewing === v.name}
+                        className={cn(
+                          "p-2 rounded-lg transition-all",
+                          voice === v.name ? "hover:bg-white/10" : "hover:bg-red-600/10"
+                        )}
+                      >
+                        {isPreviewing === v.name ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Volume2 className="w-4 h-4" />
+                        )}
+                      </button>
+                      {v.name !== 'RAPHO' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteVoice(v.name);
+                          }}
+                          className="p-2 text-neutral-500 hover:text-red-500 transition-colors"
+                        >
+                          <Plus className="w-4 h-4 rotate-45" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Audio Quality & Sample Rate */}
+          <div className="space-y-4">
+            <label className="block text-sm font-bold uppercase tracking-wider text-neutral-500 flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              Audio Quality
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['standard', 'studio'] as const).map((q) => (
+                <button
+                  key={q}
+                  onClick={() => {
+                    setAudioQuality(q);
+                    if (q === 'studio') setSampleRate(48000);
+                    else setSampleRate(24000);
+                  }}
+                  className={cn(
+                    "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                    audioQuality === q
+                      ? "bg-red-600 border-red-500 text-white"
+                      : "bg-black/40 border-white/5 text-neutral-500 hover:border-white/10"
+                  )}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+            
+            <div className="space-y-2">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-600">Sample Rate (Hz)</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[24000, 44100, 48000].map((sr) => (
+                  <button
+                    key={sr}
+                    onClick={() => setSampleRate(sr)}
+                    className={cn(
+                      "px-2 py-1 rounded-lg text-[9px] font-black transition-all border",
+                      sampleRate === sr
+                        ? "bg-white text-black border-white"
+                        : "bg-black/20 border-white/5 text-neutral-500 hover:border-white/10"
+                    )}
+                  >
+                    {sr/1000}k
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <p className="text-[9px] text-neutral-500 italic">
+              * Studio quality uses higher complexity AI models and higher sample rates.
+            </p>
+          </div>
 
           {/* Audio Effects */}
           <div className="space-y-4">
@@ -563,6 +855,28 @@ export default function CreateDrop() {
 
         {/* Editor */}
         <div className="md:col-span-2 space-y-6">
+          <AnimatePresence>
+            {statusMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className={cn(
+                  "p-4 rounded-2xl text-sm font-bold flex items-center gap-3 border",
+                  statusMessage.type === 'error' ? "bg-red-600/10 border-red-600 text-red-500" :
+                  statusMessage.type === 'success' ? "bg-green-600/10 border-green-600 text-green-500" :
+                  "bg-blue-600/10 border-blue-600 text-blue-500"
+                )}
+              >
+                {statusMessage.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
+                {statusMessage.text}
+                <button onClick={() => setStatusMessage(null)} className="ml-auto opacity-50 hover:opacity-100">
+                  <Plus className="w-4 h-4 rotate-45" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="bg-neutral-900 p-6 rounded-3xl border border-white/5">
             <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Your Script</label>
             <textarea
