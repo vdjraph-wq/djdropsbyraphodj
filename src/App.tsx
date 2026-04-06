@@ -22,10 +22,12 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 // Components (to be created)
-import VoiceAssistant from './components/VoiceAssistant';
+import CreateDrop from './components/CreateDrop';
+import LiveAssistantPage from './components/LiveAssistantPage';
 import PosterMaker from './components/PosterMaker';
 import OrderForm from './components/OrderForm';
 import OrdersList from './components/OrdersList';
+import AIChatbot from './components/AIChatbot';
 
 export default function App() {
   const [user, loading] = useAuthState(auth);
@@ -77,8 +79,9 @@ export default function App() {
 
               {/* Desktop Menu */}
               <div className="hidden md:flex items-center gap-8">
-                <Link to="/voice" className="hover:text-red-500 transition-colors">AI Assistant</Link>
+                <Link to="/create-drop" className="hover:text-red-500 transition-colors">Create Drop</Link>
                 <Link to="/posters" className="hover:text-red-500 transition-colors">Poster Maker</Link>
+                <Link to="/live" className="hover:text-red-500 transition-colors">Live AI</Link>
                 <Link to="/orders" className="hover:text-red-500 transition-colors">My Orders</Link>
                 {user ? (
                   <div className="flex items-center gap-4">
@@ -112,11 +115,12 @@ export default function App() {
                 exit={{ opacity: 0, height: 0 }}
                 className="md:hidden bg-black border-b border-white/10 overflow-hidden"
               >
-                <div className="px-4 pt-2 pb-6 space-y-4">
-                  <Link to="/voice" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">AI Assistant</Link>
-                  <Link to="/posters" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Poster Maker</Link>
-                  <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">My Orders</Link>
-                  {user ? (
+                  <div className="px-4 pt-2 pb-6 space-y-4">
+                    <Link to="/create-drop" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Create Drop</Link>
+                    <Link to="/posters" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Poster Maker</Link>
+                    <Link to="/live" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Live AI</Link>
+                    <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">My Orders</Link>
+                    {user ? (
                     <button onClick={() => { logout(); setIsMenuOpen(false); }} className="w-full text-left text-red-500 py-2">Sign Out</button>
                   ) : (
                     <button onClick={() => { login(); setIsMenuOpen(false); }} className="w-full bg-red-600 py-3 rounded-xl font-bold">Sign In</button>
@@ -131,12 +135,15 @@ export default function App() {
         <main className="pt-24 pb-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Routes>
             <Route path="/" element={<Home user={user} />} />
-            <Route path="/voice" element={<VoiceAssistant />} />
+            <Route path="/create-drop" element={<CreateDrop />} />
+            <Route path="/live" element={<LiveAssistantPage />} />
             <Route path="/posters" element={<PosterMaker />} />
             <Route path="/orders" element={<OrdersList user={user} />} />
             <Route path="/order/:type" element={<OrderForm user={user} />} />
           </Routes>
         </main>
+
+        <AIChatbot />
 
         {/* Footer / Socials */}
         <footer className="bg-black border-t border-white/10 py-12">
@@ -178,7 +185,7 @@ function Home({ user }: { user: any }) {
             Get high-quality AI-powered DJ drops, voice clones, and professional promotional posters. Powered by DJ RAPHO.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/voice" className="bg-red-600 hover:bg-red-700 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20">
+            <Link to="/create-drop" className="bg-red-600 hover:bg-red-700 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20">
               Create DJ Drop
             </Link>
             <Link to="/posters" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
@@ -194,13 +201,37 @@ function Home({ user }: { user: any }) {
         </div>
       </section>
 
+      {/* Featured Promotion */}
+      <section className="mb-20">
+        <div className="bg-neutral-900 rounded-[3rem] border border-white/5 overflow-hidden shadow-2xl relative group">
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60 z-10" />
+          <img 
+            src="https://picsum.photos/seed/rapho-official-poster/1200/1500" 
+            alt="DJ RAPHO Official Services" 
+            className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-700"
+            referrerPolicy="no-referrer"
+          />
+          <div className="absolute bottom-0 left-0 w-full p-8 sm:p-12 z-20">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-red-600 rounded-full text-white text-xs font-black uppercase tracking-widest mb-4 shadow-lg shadow-red-600/40">
+              Official Promotion
+            </div>
+            <h2 className="text-3xl sm:text-5xl font-black uppercase italic tracking-tighter mb-4">
+              Premium <span className="text-red-600">DJ Drops</span> & Graphics
+            </h2>
+            <p className="text-neutral-300 max-w-xl text-sm sm:text-lg font-medium leading-relaxed">
+              Get professional DJ drops, logos, posters, and mix intros starting from only <span className="text-white font-bold">150sh</span>. Quality service by DJ RAPHO.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Services Grid */}
       <section className="grid md:grid-cols-3 gap-8">
         <ServiceCard 
           icon={<Mic className="w-8 h-8 text-red-500" />}
           title="AI Voice Drops"
           description="Customized DJ drops using advanced AI voice cloning. Professional quality guaranteed."
-          link="/voice"
+          link="/create-drop"
         />
         <ServiceCard 
           icon={<ImageIcon className="w-8 h-8 text-red-500" />}

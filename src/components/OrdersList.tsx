@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db } from '../firebase';
+import { db, login } from '../firebase';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { ShoppingBag, Clock, CheckCircle, XCircle, MessageSquare, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -8,6 +8,7 @@ import { cn } from '../lib/utils';
 export default function OrdersList({ user }: { user: any }) {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>('all');
 
   useEffect(() => {
     if (!user) return;
@@ -24,7 +25,7 @@ export default function OrdersList({ user }: { user: any }) {
         ...doc.data()
       }));
       setOrders(ordersData);
-      setLoading(loading && false);
+      setLoading(false);
     }, (error) => {
       console.error("Error fetching orders:", error);
       setLoading(false);
@@ -33,85 +34,145 @@ export default function OrdersList({ user }: { user: any }) {
     return () => unsubscribe();
   }, [user]);
 
+  const filteredOrders = filter === 'all' 
+    ? orders 
+    : orders.filter(o => o.status === filter);
+
+  const stats = {
+    total: orders.length,
+    pending: orders.filter(o => o.status === 'pending' || o.status === 'paid').length,
+    completed: orders.filter(o => o.status === 'completed').length
+  };
+
   if (!user) {
     return (
-      <div className="max-w-4xl mx-auto text-center py-20 bg-neutral-900 rounded-3xl border border-white/5">
+      <div className="max-w-4xl mx-auto text-center py-20 bg-neutral-900 rounded-[3rem] border border-white/5">
         <ShoppingBag className="w-16 h-16 mx-auto mb-6 text-neutral-800" />
-        <h2 className="text-2xl font-bold mb-4">Please Sign In</h2>
-        <p className="text-neutral-500">You need to be signed in to view your orders.</p>
+        <h2 className="text-2xl font-black uppercase italic mb-4">Please Sign In</h2>
+        <p className="text-neutral-500 mb-8">You need to be signed in to view your order history.</p>
+        <button onClick={() => login()} className="bg-red-600 hover:bg-red-700 px-8 py-3 rounded-2xl font-bold transition-all">
+          Sign In with Google
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="mb-12 flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-black uppercase italic">My <span className="text-red-600">Orders</span></h1>
-          <p className="text-neutral-400">Track your DJ drops and poster designs.</p>
+    <div className="max-w-6xl mx-auto">
+      {/* Header & Stats */}
+      <div className="mb-12">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+          <div>
+            <h1 className="text-5xl font-black uppercase italic tracking-tighter mb-2">Order <span className="text-red-600">History</span></h1>
+            <p className="text-neutral-400 font-medium">Manage and track your premium DJ drops and designs.</p>
+          </div>
+          
+          <div className="flex gap-4">
+            <StatCard label="Total" value={stats.total} color="neutral" />
+            <StatCard label="Active" value={stats.pending} color="red" />
+            <StatCard label="Done" value={stats.completed} color="green" />
+          </div>
         </div>
-        <div className="bg-red-600/10 px-4 py-2 rounded-full border border-red-600/20 text-red-500 font-bold text-sm">
-          {orders.length} Orders
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2 p-1.5 bg-neutral-900 border border-white/5 rounded-2xl w-fit">
+          {['all', 'pending', 'paid', 'completed', 'cancelled'].map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                filter === f 
+                  ? "bg-red-600 text-white shadow-lg shadow-red-600/20" 
+                  : "text-neutral-500 hover:text-white hover:bg-white/5"
+              )}
+            >
+              {f}
+            </button>
+          ))}
         </div>
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-20">
-          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+        <div className="flex flex-col items-center justify-center py-32">
+          <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-xs font-black uppercase tracking-widest text-neutral-600">Loading your history...</p>
         </div>
-      ) : orders.length === 0 ? (
-        <div className="text-center py-20 bg-neutral-900 rounded-3xl border border-white/5">
+      ) : filteredOrders.length === 0 ? (
+        <div className="text-center py-32 bg-neutral-900 rounded-[3rem] border border-white/5">
           <ShoppingBag className="w-16 h-16 mx-auto mb-6 text-neutral-800" />
-          <h2 className="text-2xl font-bold mb-4">No Orders Yet</h2>
+          <h2 className="text-2xl font-black uppercase italic mb-4">No {filter !== 'all' ? filter : ''} Orders</h2>
           <p className="text-neutral-500">Your orders will appear here once you place them.</p>
         </div>
       ) : (
-        <div className="grid gap-6">
+        <div className="grid gap-4">
           <AnimatePresence mode="popLayout">
-            {orders.map((order) => (
+            {filteredOrders.map((order) => (
               <motion.div
                 key={order.id}
+                layout
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-neutral-900 p-6 rounded-3xl border border-white/5 hover:border-red-600/30 transition-all group"
+                className="bg-neutral-900 p-6 rounded-[2rem] border border-white/5 hover:border-red-600/30 transition-all group relative overflow-hidden"
               >
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                  <div className="flex items-center gap-6">
+                <div className="absolute top-0 left-0 w-1 h-full bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+                  <div className="flex items-start sm:items-center gap-6">
                     <div className={cn(
-                      "w-16 h-16 rounded-2xl flex items-center justify-center shrink-0",
+                      "w-20 h-20 rounded-[1.5rem] flex items-center justify-center shrink-0 shadow-inner",
                       order.type === 'voice_drop' ? "bg-blue-600/10 text-blue-500" :
                       order.type === 'poster' ? "bg-purple-600/10 text-purple-500" : "bg-orange-600/10 text-orange-500"
                     )}>
-                      {order.type === 'voice_drop' ? <Clock className="w-8 h-8" /> : <ExternalLink className="w-8 h-8" />}
+                      {order.type === 'voice_drop' ? <Clock className="w-10 h-10" /> : <ExternalLink className="w-10 h-10" />}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-bold text-lg uppercase tracking-tight">
+                    
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-3 mb-2">
+                        <h3 className="font-black text-xl uppercase italic tracking-tighter">
                           {order.type === 'voice_drop' ? 'AI Voice Drop' : order.type === 'poster' ? 'Premium Poster' : 'Professional Logo'}
                         </h3>
                         <StatusBadge status={order.status} />
                       </div>
-                      <p className="text-sm text-neutral-500 line-clamp-1 italic">"{order.script}"</p>
-                      <div className="text-xs text-neutral-600 mt-2 flex items-center gap-4">
-                        <span>KES {order.amount}</span>
-                        <span>{new Date(order.createdAt).toLocaleDateString()}</span>
-                        <span>M-Pesa: {order.mpesaCode}</span>
+                      
+                      <div className="space-y-1">
+                        <p className="text-sm text-neutral-400 font-medium line-clamp-2 italic">
+                          "{order.script || order.prompt}"
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">Amount</span>
+                            <span className="text-sm font-bold text-white">KES {order.amount}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">Date</span>
+                            <span className="text-sm font-bold text-neutral-400">{new Date(order.createdAt?.seconds * 1000 || Date.now()).toLocaleDateString()}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">M-Pesa</span>
+                            <span className="text-sm font-bold text-red-500/80 uppercase">{order.mpesaCode}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
                     <button 
                       onClick={() => {
                         const message = `Hello DJ RAPHO, I'm checking on my order ID: ${order.id}.\nType: ${order.type}\nStatus: ${order.status}`;
                         window.open(`https://wa.me/254745260364?text=${encodeURIComponent(message)}`, '_blank');
                       }}
-                      className="flex-1 md:flex-none bg-green-600/10 hover:bg-green-600/20 text-green-500 px-6 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all border border-green-600/20"
+                      className="w-full sm:w-auto bg-green-600/10 hover:bg-green-600/20 text-green-500 px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all border border-green-600/20 shadow-lg shadow-green-600/5"
                     >
                       <MessageSquare className="w-4 h-4" />
-                      Chat DJ RAPHO
+                      Chat Support
                     </button>
+                    
+                    <div className="text-[10px] font-black uppercase text-neutral-700 tracking-[0.2em] hidden lg:block">
+                      ID: {order.id.slice(0, 8)}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -119,6 +180,21 @@ export default function OrdersList({ user }: { user: any }) {
           </AnimatePresence>
         </div>
       )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, color }: { label: string, value: number, color: 'neutral' | 'red' | 'green' }) {
+  const colors = {
+    neutral: "bg-neutral-900 border-white/5",
+    red: "bg-red-600/10 border-red-600/20 text-red-500",
+    green: "bg-green-600/10 border-green-600/20 text-green-500"
+  };
+
+  return (
+    <div className={cn("px-6 py-4 rounded-2xl border flex flex-col items-center justify-center min-w-[100px]", colors[color])}>
+      <div className="text-2xl font-black italic tracking-tighter">{value}</div>
+      <div className="text-[10px] font-black uppercase tracking-widest opacity-60">{label}</div>
     </div>
   );
 }
