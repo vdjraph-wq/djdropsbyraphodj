@@ -25,6 +25,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import CreateDrop from './components/CreateDrop';
 import LiveAssistantPage from './components/LiveAssistantPage';
 import PosterMaker from './components/PosterMaker';
+import PhotoGenerator from './components/PhotoGenerator';
 import OrderForm from './components/OrderForm';
 import OrdersList from './components/OrdersList';
 import AIChatbot from './components/AIChatbot';
@@ -80,6 +81,7 @@ export default function App() {
               {/* Desktop Menu */}
               <div className="hidden md:flex items-center gap-8">
                 <Link to="/create-drop" className="hover:text-red-500 transition-colors">Create Drop</Link>
+                <Link to="/photo-generator" className="hover:text-red-500 transition-colors">Photo Generator</Link>
                 <Link to="/posters" className="hover:text-red-500 transition-colors">Poster Maker</Link>
                 <Link to="/live" className="hover:text-red-500 transition-colors">Live AI</Link>
                 <Link to="/orders" className="hover:text-red-500 transition-colors">My Orders</Link>
@@ -117,6 +119,7 @@ export default function App() {
               >
                   <div className="px-4 pt-2 pb-6 space-y-4">
                     <Link to="/create-drop" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Create Drop</Link>
+                    <Link to="/photo-generator" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Photo Generator</Link>
                     <Link to="/posters" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Poster Maker</Link>
                     <Link to="/live" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Live AI</Link>
                     <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">My Orders</Link>
@@ -138,6 +141,7 @@ export default function App() {
             <Route path="/create-drop" element={<CreateDrop />} />
             <Route path="/live" element={<LiveAssistantPage />} />
             <Route path="/posters" element={<PosterMaker />} />
+            <Route path="/photo-generator" element={<PhotoGenerator />} />
             <Route path="/orders" element={<OrdersList user={user} />} />
             <Route path="/order/:type" element={<OrderForm user={user} />} />
           </Routes>
@@ -188,6 +192,9 @@ function Home({ user }: { user: any }) {
             <Link to="/create-drop" className="bg-red-600 hover:bg-red-700 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20">
               Create DJ Drop
             </Link>
+            <Link to="/photo-generator" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
+              Photo Generator
+            </Link>
             <Link to="/posters" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
               Design Poster
             </Link>
@@ -226,12 +233,18 @@ function Home({ user }: { user: any }) {
       </section>
 
       {/* Services Grid */}
-      <section className="grid md:grid-cols-3 gap-8">
+      <section className="grid md:grid-cols-4 gap-8">
         <ServiceCard 
           icon={<Mic className="w-8 h-8 text-red-500" />}
           title="AI Voice Drops"
           description="Customized DJ drops using advanced AI voice cloning. Professional quality guaranteed."
           link="/create-drop"
+        />
+        <ServiceCard 
+          icon={<ImageIcon className="w-8 h-8 text-red-500" />}
+          title="AI Photo Generator"
+          description="Create professional DJ posters and logos instantly with AI."
+          link="/photo-generator"
         />
         <ServiceCard 
           icon={<ImageIcon className="w-8 h-8 text-red-500" />}

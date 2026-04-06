@@ -1,5 +1,5 @@
 {
   "name": "DJ RAPHO DROPS",
-  "description": "Premium AI-powered DJ drops, voice clones, and promotional posters for DJs and entertainers.",
+  "description": "Premium AI-powered DJ drops, voice clones, photo generator, and promotional posters for DJs and entertainers.",
   "requestFramePermissions": ["camera", "microphone", "geolocation"]
 }
