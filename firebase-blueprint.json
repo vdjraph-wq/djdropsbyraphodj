@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profile",
+      "description": "Stores user information and preferences.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string", "format": "uri" },
+        "phoneNumber": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "client"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "orders": {
+      "title": "Drop Order",
+      "description": "Details of a DJ drop or poster order.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["voice_drop", "poster", "logo"] },
+        "script": { "type": "string", "description": "The text for the drop or poster" },
+        "status": { "type": "string", "enum": ["pending", "paid", "completed", "cancelled"] },
+        "amount": { "type": "number" },
+        "mpesaCode": { "type": "string" },
+        "whatsappNumber": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "status", "amount"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "users",
+      "description": "User profile documents"
+    },
+    "/orders/{orderId}": {
+      "schema": "orders",
+      "description": "Order tracking documents"
+    }
+  }
+}
