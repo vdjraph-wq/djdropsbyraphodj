@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db, login } from '../firebase';
+import { db, loginWithGoogle as login } from '../firebase';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { ShoppingBag, Clock, CheckCircle, XCircle, MessageSquare, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { db, auth, login } from '../firebase';
+import { db, auth, loginWithGoogle as login } from '../firebase';
 import { addDoc, collection } from 'firebase/firestore';
 import { CreditCard, MessageSquare, CheckCircle, Loader2, Phone, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';

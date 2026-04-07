@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth, login, logout, db } from './firebase';
+import { auth, logout, db } from './firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { 
   Mic, 
@@ -18,17 +18,14 @@ import {
   LogOut,
   Phone,
   CreditCard,
-  Key,
-  ShieldCheck,
-  ShieldAlert,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 
 // Components (to be created)
-import CreateDrop from './components/CreateDrop';
 import LiveAssistantPage from './components/LiveAssistantPage';
 import PosterMaker from './components/PosterMaker';
 import PhotoGenerator from './components/PhotoGenerator';
@@ -38,32 +35,12 @@ import AIChatbot from './components/AIChatbot';
 import TextDropOrder from './components/TextDropOrder';
 import AdminDashboard from './components/AdminDashboard';
 import HeroBackground from './components/HeroBackground';
+import LoginModal from './components/LoginModal';
 
 export default function App() {
   const [user, loading] = useAuthState(auth);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const checkApiKey = async () => {
-      if ((window as any).aistudio?.hasSelectedApiKey) {
-        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-        setHasApiKey(hasKey);
-      }
-    };
-    checkApiKey();
-    // Check periodically in case they select it in another tab or dialog
-    const interval = setInterval(checkApiKey, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleActivateKeys = async () => {
-    if ((window as any).aistudio?.openSelectKey) {
-      await (window as any).aistudio.openSelectKey();
-      // Assume success as per instructions to avoid race conditions
-      setHasApiKey(true);
-    }
-  };
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   const isAdmin = user?.email === 'vdjraph@gmail.com';
 
@@ -113,38 +90,47 @@ export default function App() {
 
               {/* Desktop Menu */}
               <div className="hidden md:flex items-center gap-8">
-                <button 
-                  onClick={handleActivateKeys}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all border",
-                    hasApiKey 
-                      ? "bg-green-600/10 border-green-600/30 text-green-500" 
-                      : "bg-amber-600/10 border-amber-600/30 text-amber-500 hover:bg-amber-600/20"
-                  )}
-                >
-                  {hasApiKey ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
-                  {hasApiKey ? "API ACTIVE" : "ACTIVATE API"}
-                </button>
-                <Link to="/create-drop" className="hover:text-red-500 transition-colors">Create Drop</Link>
-                <Link to="/text-order" className="hover:text-red-500 transition-colors">Manual Order</Link>
-                <Link to="/photo-generator" className="hover:text-red-500 transition-colors">Photo Generator</Link>
-                <Link to="/posters" className="hover:text-red-500 transition-colors">Poster Maker</Link>
-                <Link to="/live" className="hover:text-red-500 transition-colors">Live AI</Link>
-                <Link to="/orders" className="hover:text-red-500 transition-colors">My Orders</Link>
-                {isAdmin && (
-                  <Link to="/admin" className="bg-red-600/10 text-red-500 px-4 py-1.5 rounded-full font-black uppercase tracking-widest text-[10px] border border-red-600/20 hover:bg-red-600/20 transition-all">
-                    Admin Panel
-                  </Link>
+                {isAdmin ? (
+                  <>
+                    <Link to="/text-order" className="hover:text-red-500 transition-colors">Order Drops, Logos, Posters & More</Link>
+                    <Link to="/live" className="hover:text-red-500 transition-colors">Live AI</Link>
+                    <Link to="/admin" className="bg-red-600/10 text-red-500 px-4 py-1.5 rounded-full font-black uppercase tracking-widest text-[10px] border border-red-600/20 hover:bg-red-600/20 transition-all">
+                      Admin Panel
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <Link to="/text-order" className="hover:text-red-500 transition-colors">Order Drops, Logos, Posters & More</Link>
+                    <Link to="/live" className="hover:text-red-500 transition-colors">Live AI</Link>
+                    <Link to="/orders" className="hover:text-red-500 transition-colors">My Orders</Link>
+                  </>
                 )}
+
                 {user ? (
-                  <div className="flex items-center gap-4">
-                    <img src={user.photoURL || ''} alt="" className="w-8 h-8 rounded-full border border-white/20" />
-                    <button onClick={logout} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                  <div className="flex items-center gap-4 pl-4 border-l border-white/10">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center overflow-hidden border border-white/20">
+                        {user.photoURL ? (
+                          <img src={user.photoURL} alt={user.displayName || ''} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <UserIcon className="w-4 h-4 text-white" />
+                        )}
+                      </div>
+                      <span className="text-white normal-case font-bold">{user.displayName || user.email?.split('@')[0]}</span>
+                    </div>
+                    <button 
+                      onClick={logout}
+                      className="p-2 hover:bg-white/5 rounded-full transition-colors text-neutral-500 hover:text-red-500"
+                      title="Logout"
+                    >
                       <LogOut className="w-5 h-5" />
                     </button>
                   </div>
                 ) : (
-                  <button onClick={login} className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-full font-bold transition-all active:scale-95">
+                  <button 
+                    onClick={() => setIsLoginModalOpen(true)}
+                    className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-full font-bold transition-all active:scale-95 shadow-lg shadow-red-600/20"
+                  >
                     Sign In
                   </button>
                 )}
@@ -169,35 +155,36 @@ export default function App() {
                 className="md:hidden bg-black border-b border-white/10 overflow-hidden"
               >
                   <div className="px-4 pt-2 pb-6 space-y-4">
-                    <button 
-                      onClick={() => { handleActivateKeys(); setIsMenuOpen(false); }}
-                      className={cn(
-                        "w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold border",
-                        hasApiKey 
-                          ? "bg-green-600/10 border-green-600/30 text-green-500" 
-                          : "bg-amber-600/10 border-amber-600/30 text-amber-500"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        {hasApiKey ? <ShieldCheck className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
-                        {hasApiKey ? "API KEYS ACTIVE" : "ACTIVATE API KEYS"}
-                      </div>
-                      {!hasApiKey && <Key className="w-4 h-4" />}
-                    </button>
-                    <Link to="/create-drop" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Create Drop</Link>
-                    <Link to="/text-order" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Manual Order</Link>
-                    <Link to="/photo-generator" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Photo Generator</Link>
-                    <Link to="/posters" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Poster Maker</Link>
-                    <Link to="/live" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Live AI</Link>
-                    <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">My Orders</Link>
-                    {isAdmin && (
-                      <Link to="/admin" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5 text-red-500 font-black">Admin Panel</Link>
+                    {isAdmin ? (
+                      <>
+                        <Link to="/text-order" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Order Drops, Logos, Posters & More</Link>
+                        <Link to="/live" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Live AI</Link>
+                        <Link to="/admin" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5 text-red-500 font-black">Admin Panel</Link>
+                      </>
+                    ) : (
+                      <>
+                        <Link to="/text-order" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Order Drops, Logos, Posters & More</Link>
+                        <Link to="/live" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Live AI</Link>
+                        <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">My Orders</Link>
+                      </>
                     )}
+
                     {user ? (
-                    <button onClick={() => { logout(); setIsMenuOpen(false); }} className="w-full text-left text-red-500 py-2">Sign Out</button>
-                  ) : (
-                    <button onClick={() => { login(); setIsMenuOpen(false); }} className="w-full bg-red-600 py-3 rounded-xl font-bold">Sign In</button>
-                  )}
+                      <button 
+                        onClick={() => { logout(); setIsMenuOpen(false); }} 
+                        className="w-full text-left text-red-500 py-4 font-black flex items-center gap-3 border-t border-white/5 mt-4"
+                      >
+                        <LogOut className="w-6 h-6" />
+                        LOGOUT
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => { setIsLoginModalOpen(true); setIsMenuOpen(false); }}
+                        className="w-full bg-red-600 py-4 rounded-xl font-bold mt-4 shadow-lg shadow-red-600/20"
+                      >
+                        Sign In
+                      </button>
+                    )}
                 </div>
               </motion.div>
             )}
@@ -207,17 +194,18 @@ export default function App() {
         {/* Main Content */}
         <main className="pt-24 pb-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Routes>
-            <Route path="/" element={<Home user={user} />} />
-            <Route path="/create-drop" element={<CreateDrop />} />
+            <Route path="/" element={<Home user={user} isAdmin={isAdmin} />} />
             <Route path="/text-order" element={<TextDropOrder />} />
             <Route path="/live" element={<LiveAssistantPage />} />
-            <Route path="/posters" element={<PosterMaker />} />
-            <Route path="/photo-generator" element={<PhotoGenerator />} />
+            <Route path="/posters" element={isAdmin ? <PosterMaker /> : <Home user={user} isAdmin={isAdmin} />} />
+            <Route path="/photo-generator" element={isAdmin ? <PhotoGenerator /> : <Home user={user} isAdmin={isAdmin} />} />
             <Route path="/orders" element={<OrdersList user={user} />} />
             <Route path="/order/:type" element={<OrderForm user={user} />} />
             {isAdmin && <Route path="/admin" element={<AdminDashboard />} />}
           </Routes>
         </main>
+
+        <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} />
 
         <AIChatbot />
 
@@ -243,7 +231,7 @@ export default function App() {
   );
 }
 
-function Home({ user }: { user: any }) {
+function Home({ user, isAdmin }: { user: any, isAdmin: boolean }) {
   return (
     <div className="space-y-20">
       {/* Hero */}
@@ -272,17 +260,17 @@ function Home({ user }: { user: any }) {
           </h1>
           
           <p className="text-neutral-400 text-lg md:text-xl mb-12 max-w-2xl mx-auto leading-relaxed font-medium">
-            Professional AI-powered DJ drops, voice cloning, and high-impact promotional posters. 
+            Professional DJ drops, voice cloning, and high-impact promotional posters. 
             <span className="text-white"> Built for DJs who demand the best.</span>
           </p>
           
           <div className="flex flex-wrap gap-4 justify-center">
-            <Link to="/create-drop" className="group relative bg-red-600 hover:bg-red-700 px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-red-600/20 flex items-center gap-3">
-              Create DJ Drop
+            <Link to="/text-order" className="group relative bg-red-600 hover:bg-red-700 px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-red-600/20 flex items-center gap-3">
+              Order Drops, Logos & More
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>
-            <Link to="/text-order" className="bg-white/5 hover:bg-white/10 border border-white/10 px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all hover:scale-105 active:scale-95 backdrop-blur-md">
-              Manual Order
+            <Link to="/order/3d_logo" className="bg-white/5 hover:bg-white/10 border border-white/10 px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all hover:scale-105 active:scale-95 backdrop-blur-md">
+              Order 3D Logo
             </Link>
           </div>
         </motion.div>
@@ -313,17 +301,11 @@ function Home({ user }: { user: any }) {
       </section>
 
       {/* Services Grid */}
-      <section className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-8">
+      <section className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
         <ServiceCard 
           icon={<Mic className="w-8 h-8 text-red-500" />}
-          title="AI Voice Drops"
-          description="Customized DJ drops using advanced AI voice cloning. Professional quality guaranteed."
-          link="/create-drop"
-        />
-        <ServiceCard 
-          icon={<MessageSquare className="w-8 h-8 text-red-500" />}
-          title="Manual Studio Drops"
-          description="Order professional studio recordings directly from DJ RAPHO for only 150sh."
+          title="Order DJ Drops"
+          description="Professional studio recordings directly from DJ RAPHO. High-impact and customized."
           link="/text-order"
         />
         <ServiceCard 
@@ -342,7 +324,7 @@ function Home({ user }: { user: any }) {
           icon={<ImageIcon className="w-8 h-8 text-red-500" />}
           title="Poster Design"
           description="Instant professional posters for your events and brand identity."
-          link="/posters"
+          link="/order/poster"
         />
         <ServiceCard 
           icon={<ShoppingBag className="w-8 h-8 text-red-500" />}
