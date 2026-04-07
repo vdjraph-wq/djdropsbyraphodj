@@ -43,7 +43,12 @@ export default function LiveAssistant() {
           onclose: () => {
             stopSession();
           },
-          onerror: (err) => {
+          onerror: (err: any) => {
+            const msg = err?.message || String(err);
+            if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+              console.log("Live session aborted (expected)");
+              return;
+            }
             console.error("Live API Error:", err);
             stopSession();
           }

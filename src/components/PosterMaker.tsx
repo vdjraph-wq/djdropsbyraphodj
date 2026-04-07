@@ -16,22 +16,27 @@ export default function PosterMaker() {
 
   const [mode, setMode] = useState<'poster' | 'logo'>('poster');
 
-  const callAiWithRetry = async (fn: () => Promise<any>, maxRetries = 2) => {
+  const callAiWithRetry = async (fn: () => Promise<any>, maxRetries = 3) => {
     let lastError: any;
     for (let i = 0; i <= maxRetries; i++) {
       try {
         return await fn();
       } catch (error: any) {
         lastError = error;
-        const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
-        const isRateLimit = errorStr.includes("RESOURCE_EXHAUSTED") || 
+        const errorStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
+        const isRetryable = errorStr.includes("RESOURCE_EXHAUSTED") || 
                            errorStr.includes("429") || 
+                           errorStr.includes("aborted") ||
+                           errorStr.includes("signal") ||
+                           errorStr.includes("fetch failed") ||
+                           errorStr.includes("deadline exceeded") ||
                            error?.status === 429 ||
                            error?.code === 429;
         
-        if (isRateLimit && i < maxRetries) {
-          setStatusMessage({ text: "AI is busy. Retrying automatically...", type: 'info' });
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, i + 1) * 1000));
+        if (isRetryable && i < maxRetries) {
+          setStatusMessage({ text: "AI is busy or connection interrupted. Retrying...", type: 'info' });
+          const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
         throw error;
@@ -75,6 +80,11 @@ export default function PosterMaker() {
         }
       }
     } catch (error: any) {
+      const msg = error?.message || String(error);
+      if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+        console.log("Poster generation aborted (expected)");
+        return;
+      }
       console.error("Error generating poster:", error);
       const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
       if (errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("429")) {

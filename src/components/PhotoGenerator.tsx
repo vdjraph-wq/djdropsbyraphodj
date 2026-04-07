@@ -20,7 +20,33 @@ export default function PhotoGenerator() {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const fullPrompt = `${style}. Subject: ${prompt}. High quality, 4k resolution, cinematic lighting.`;
       
-      const response = await ai.models.generateContent({
+      const callWithRetry = async (fn: () => Promise<any>, maxRetries = 3): Promise<any> => {
+        let lastError: any;
+        for (let i = 0; i <= maxRetries; i++) {
+          try {
+            return await fn();
+          } catch (err: any) {
+            lastError = err;
+            const msg = err?.message || String(err);
+            const isRetryable = msg.includes("aborted") || 
+                               msg.includes("signal") || 
+                               msg.includes("429") || 
+                               msg.includes("RESOURCE_EXHAUSTED") ||
+                               msg.includes("fetch failed") ||
+                               msg.includes("deadline exceeded");
+
+            if (i < maxRetries && isRetryable) {
+              const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw lastError;
+      };
+
+      const response = await callWithRetry(() => ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
           parts: [
@@ -32,7 +58,7 @@ export default function PhotoGenerator() {
             aspectRatio: aspectRatio,
           },
         },
-      });
+      }));
 
       for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData) {
@@ -41,7 +67,12 @@ export default function PhotoGenerator() {
           break;
         }
       }
-    } catch (error) {
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+        console.log("Image generation aborted (expected)");
+        return;
+      }
       console.error("Error generating image:", error);
     } finally {
       setIsGenerating(false);

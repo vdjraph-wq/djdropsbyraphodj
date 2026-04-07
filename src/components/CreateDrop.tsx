@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { Mic, Loader2, Volume2, ArrowRight, Sparkles, Download, Wand2, Activity, Upload, Plus, CheckCircle, MessageSquare, Trash2, Play, Pause, Sliders, Music2 } from 'lucide-react';
+import { Mic, Loader2, Volume2, ArrowRight, Sparkles, Download, Wand2, Activity, Upload, Plus, CheckCircle, MessageSquare, Trash2, Play, Pause, Sliders, Music2, Cloud, Save, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useNavigate, Link } from 'react-router-dom';
 import WaveSurfer from 'wavesurfer.js';
+import { db, auth } from '../firebase';
+import { collection, addDoc, onSnapshot, query, where, deleteDoc, doc } from 'firebase/firestore';
+import { useAuthState } from 'react-firebase-hooks/auth';
 
 interface AudioSample {
   id: string;
@@ -27,10 +30,8 @@ const WaveformPlayer = ({ audioUrl, isPlaying, onTogglePlay }: { audioUrl: strin
       cursorColor: '#ef4444',
       barWidth: 2,
       barRadius: 3,
-      responsive: true,
       height: 40,
-      normalize: true,
-      partialRender: true
+      normalize: true
     });
 
     wavesurfer.load(audioUrl);
@@ -105,10 +106,11 @@ const LiveWaveform = ({ stream }: { stream: MediaStream | null }) => {
 };
 
 export default function CreateDrop() {
+  const [user] = useAuthState(auth);
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [voice, setVoice] = useState<string>('RAPHO');
-  const [customVoices, setCustomVoices] = useState<{name: string, description: string, audioData?: string, samples?: AudioSample[]}[]>([
+  const [customVoices, setCustomVoices] = useState<{name: string, description: string, audioData?: string, samples?: AudioSample[], id?: string}[]>([
     { name: 'RAPHO', description: 'Deep male voice, authoritative, similar to Wigman style, high energy' }
   ]);
   const [mode, setMode] = useState<'standard' | 'cloning'>('standard');
@@ -124,6 +126,8 @@ export default function CreateDrop() {
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [pitch, setPitch] = useState(1.0);
   const [speed, setSpeed] = useState(1.0);
+  const [emotionalTag, setEmotionalTag] = useState('Energetic');
+  const [soundEffect, setSoundEffect] = useState('None');
   const [effects, setEffects] = useState({
     reverb: false,
     echo: false,
@@ -137,8 +141,33 @@ export default function CreateDrop() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
+  const [isSavingVoice, setIsSavingVoice] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  // Fetch saved voices from Firestore
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, `users/${user.uid}/cloned_voices`),
+      where("userId", "==", user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const voices = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as any[];
+      
+      setCustomVoices([
+        { name: 'RAPHO', description: 'Deep male voice, authoritative, similar to Wigman style, high energy' },
+        ...voices
+      ]);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const startRecording = async () => {
     try {
@@ -165,8 +194,11 @@ export default function CreateDrop() {
             name: `Recording ${samples.length + 1}`,
             blob: audioBlob
           };
-          setSamples(prev => [...prev, newSample]);
-          analyzeVoice(newSample.data);
+          setSamples(prev => {
+            const updated = [...prev, newSample];
+            analyzeVoice(newSample.data, updated);
+            return updated;
+          });
         };
         reader.readAsDataURL(audioBlob);
         stream.getTracks().forEach(track => track.stop());
@@ -211,7 +243,8 @@ export default function CreateDrop() {
           };
           setSamples(prev => {
             const updated = [...prev, newSample];
-            if (updated.length === 1) analyzeVoice(base64);
+            // Analyze with the new set of samples
+            analyzeVoice(base64, updated);
             return updated;
           });
         };
@@ -226,7 +259,7 @@ export default function CreateDrop() {
 
   const addClonedVoice = () => {
     if (samples.length === 0 && !cloningPrompt) return;
-    const name = voiceName.trim() || `Cloned ${customVoices.length + 1}`;
+    const name = voiceName.trim() || `Cloned ${customVoices.length}`;
     setCustomVoices(prev => [...prev, { 
       name, 
       description: cloningPrompt,
@@ -238,39 +271,92 @@ export default function CreateDrop() {
     setSamples([]);
     setVoiceName('');
     setCloningPrompt('');
-    setStatusMessage({ text: `Voice "${name}" cloned successfully!`, type: 'success' });
+    setStatusMessage({ text: `Voice "${name}" added to session!`, type: 'success' });
     setTimeout(() => setStatusMessage(null), 3000);
   };
 
-  const deleteVoice = (name: string) => {
-    if (name === 'RAPHO') return;
-    setCustomVoices(prev => prev.filter(v => v.name !== name));
-    if (voice === name) setVoice('RAPHO');
+  const saveVoiceToProfile = async () => {
+    if (!user) {
+      setStatusMessage({ text: "Please sign in to save voices to your profile.", type: 'error' });
+      return;
+    }
+    if (samples.length === 0 && !cloningPrompt) return;
+    
+    setIsSavingVoice(true);
+    try {
+      const name = voiceName.trim() || `Cloned ${customVoices.length}`;
+      await addDoc(collection(db, `users/${user.uid}/cloned_voices`), {
+        userId: user.uid,
+        name,
+        description: cloningPrompt,
+        createdAt: new Date().toISOString()
+      });
+      
+      setVoice(name);
+      setMode('standard');
+      setSamples([]);
+      setVoiceName('');
+      setCloningPrompt('');
+      setStatusMessage({ text: `Voice "${name}" saved to your profile!`, type: 'success' });
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (error) {
+      console.error("Error saving voice:", error);
+      setStatusMessage({ text: "Failed to save voice to profile.", type: 'error' });
+    } finally {
+      setIsSavingVoice(false);
+    }
+  };
+
+  const deleteVoice = async (v: any) => {
+    if (v.name === 'RAPHO') return;
+    
+    if (v.id && user) {
+      try {
+        await deleteDoc(doc(db, `users/${user.uid}/cloned_voices`, v.id));
+        setStatusMessage({ text: "Voice deleted from profile.", type: 'success' });
+      } catch (error) {
+        console.error("Error deleting voice:", error);
+        setStatusMessage({ text: "Failed to delete voice.", type: 'error' });
+      }
+    } else {
+      setCustomVoices(prev => prev.filter(cv => cv.name !== v.name));
+    }
+    
+    if (voice === v.name) setVoice('RAPHO');
   };
 
   const clearReference = () => {
-    setUploadedAudio(null);
-    setUploadedFileName(null);
+    setSamples([]);
     if (isRecording) stopRecording();
   };
 
   const playReference = () => {
-    if (!uploadedAudio) return;
-    const audio = new Audio(uploadedAudio);
+    if (samples.length === 0) return;
+    const audio = new Audio(samples[0].data);
     audio.play().catch(e => console.error("Reference playback failed:", e));
   };
 
-  const analyzeVoice = async (audioData?: string) => {
-    const dataToAnalyze = audioData || samples[0]?.data;
-    if (!dataToAnalyze) return;
+  const analysisAbortControllerRef = useRef<AbortController | null>(null);
+
+  const analyzeVoice = async (audioData?: string, currentSamples?: AudioSample[]) => {
+    const samplesToUse = currentSamples || samples;
+    const dataToAnalyze = audioData || samplesToUse[0]?.data;
+    if (!dataToAnalyze && samplesToUse.length === 0) return;
+    
+    // Cancel any ongoing analysis
+    if (analysisAbortControllerRef.current) {
+      analysisAbortControllerRef.current.abort();
+    }
+    analysisAbortControllerRef.current = new AbortController();
+    const signal = analysisAbortControllerRef.current.signal;
+
     setIsAnalyzingVoice(true);
-    setStatusMessage({ text: "AI is analyzing your voice reference...", type: 'info' });
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       // If multiple samples, we can send them all for a more robust analysis
-      const audioParts = samples.length > 0 
-        ? samples.slice(0, 3).map(s => ({
+      const audioParts = samplesToUse.length > 0 
+        ? samplesToUse.slice(0, 3).map(s => ({
             inlineData: {
               data: s.data.split(',')[1],
               mimeType: s.data.split(';')[0].split(':')[1]
@@ -287,41 +373,61 @@ export default function CreateDrop() {
         model: "gemini-3-flash-preview",
         contents: [
           ...audioParts,
-          { text: "Analyze these audio samples and describe the voice's characteristics (pitch, tone, energy, accent, style) in a concise way (under 40 words). This description will be used as a prompt for a TTS engine to clone the voice. Focus on technical attributes that remain consistent across samples." }
+          { text: "Analyze these audio samples and extract the 'Voice DNA' (pitch, tone, energy, accent, unique vocal artifacts) in a concise way (under 40 words). This DNA profile will be used to power a high-fidelity voice cloning engine. Focus on the core identity of the voice that remains consistent." }
         ]
       }));
       
+      // Check if this request is still the latest one
+      if (signal.aborted) return;
+
       if (response.text) {
         setCloningPrompt(response.text.trim());
         setStatusMessage({ text: "Voice analyzed and description updated!", type: 'success' });
         setTimeout(() => setStatusMessage(null), 3000);
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (signal.aborted) return;
+      
+      const msg = error?.message || String(error);
+      if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+        console.log("Voice analysis aborted (expected)");
+        return;
+      }
       console.error("Voice analysis error:", error);
       setStatusMessage({ text: "Failed to analyze voice. Please try again.", type: 'error' });
     } finally {
-      setIsAnalyzingVoice(false);
+      if (!signal.aborted) {
+        setIsAnalyzingVoice(false);
+        analysisAbortControllerRef.current = null;
+      }
     }
   };
 
   const [isPreviewing, setIsPreviewing] = useState<string | null>(null);
 
-  const callAiWithRetry = async (fn: () => Promise<any>, maxRetries = 2) => {
+  const callAiWithRetry = async (fn: () => Promise<any>, maxRetries = 3) => {
     let lastError: any;
     for (let i = 0; i <= maxRetries; i++) {
       try {
         return await fn();
       } catch (error: any) {
         lastError = error;
-        const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
-        const isRateLimit = errorStr.includes("RESOURCE_EXHAUSTED") || 
+        const errorStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
+        
+        // Check for common transient errors including the "signal is aborted" one
+        const isRetryable = errorStr.includes("RESOURCE_EXHAUSTED") || 
                            errorStr.includes("429") || 
+                           errorStr.includes("aborted") ||
+                           errorStr.includes("signal") ||
+                           errorStr.includes("fetch failed") ||
+                           errorStr.includes("deadline exceeded") ||
                            error?.status === 429 ||
                            error?.code === 429;
         
-        if (isRateLimit && i < maxRetries) {
-          // Wait before retrying: 2s, 4s
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, i + 1) * 1000));
+        if (isRetryable && i < maxRetries) {
+          // Exponential backoff with jitter: 1s, 2s, 4s... plus random offset
+          const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
         throw error;
@@ -330,31 +436,38 @@ export default function CreateDrop() {
     throw lastError;
   };
 
-  const previewVoice = async (vName: string, description: string, audioData?: string) => {
+  const previewVoice = async (vName: string, description: string, audioSamples?: AudioSample[]) => {
     setIsPreviewing(vName);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       let finalDescription = description;
 
-      if (audioData) {
+      if (audioSamples && audioSamples.length > 0) {
         try {
+          const audioParts = audioSamples.slice(0, 3).map(s => ({
+            inlineData: {
+              data: s.data.split(',')[1],
+              mimeType: s.data.split(';')[0].split(':')[1]
+            }
+          }));
+
           const analysisResponse = await callAiWithRetry(() => ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: [
-              {
-                inlineData: {
-                  data: audioData.split(',')[1],
-                  mimeType: audioData.split(';')[0].split(':')[1]
-                }
-              },
-              { text: `The user wants to clone a voice with this description: "${description}". Analyze the provided audio and combine its technical characteristics (tone, pitch, energy, accent) with the user's description to create a final technical profile for a TTS engine. Keep it under 60 words.` }
+              ...audioParts,
+              { text: `The user wants to clone a voice with this description: "${description}". Analyze the provided audio samples and combine their technical characteristics (tone, pitch, energy, accent) with the user's description to create a final technical profile for a TTS engine. Keep it under 60 words.` }
             ]
           }));
           if (analysisResponse.text) {
             finalDescription = analysisResponse.text;
           }
-        } catch (e) {
-          console.error("Analysis error during preview:", e);
+        } catch (e: any) {
+          const msg = e?.message || String(e);
+          if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+            console.log("Analysis aborted during preview (expected)");
+          } else {
+            console.error("Analysis error during preview:", e);
+          }
         }
       }
 
@@ -388,6 +501,11 @@ export default function CreateDrop() {
         audio.play().catch(e => console.error("Audio playback failed:", e));
       }
     } catch (error: any) {
+      const msg = error?.message || String(error);
+      if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+        console.log("Preview aborted (expected)");
+        return;
+      }
       console.error("Preview error:", error);
       const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
       if (errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("429")) {
@@ -424,37 +542,47 @@ export default function CreateDrop() {
       
       const effectsInstruction = effectsList ? ` Apply background effects: ${effectsList}.` : '';
       
-      voiceDescription = `${voiceDescription}. ${fineTuning}${effectsInstruction}`;
+      const emotionalInstruction = `Deliver the script with a ${emotionalTag.toLowerCase()} emotion.`;
+      const sfxInstruction = soundEffect !== 'None' ? ` Incorporate a ${soundEffect.toLowerCase()} sound effect at the beginning or end of the drop.` : '';
+      
+      voiceDescription = `${voiceDescription}. ${emotionalInstruction}${sfxInstruction} ${fineTuning}${effectsInstruction}`;
 
-      // If audio is provided, analyze it first to get a better description for the TTS model
-      const audioData = selectedCustomVoice?.audioData || (samples.length > 0 ? samples[0].data : null);
-      if (audioData) {
+      // If audio samples are provided, analyze them for better cloning
+      const referenceSamples = selectedCustomVoice?.samples || samples;
+      if (referenceSamples.length > 0) {
         try {
+          const audioParts = referenceSamples.slice(0, 3).map(s => ({
+            inlineData: {
+              data: s.data.split(',')[1],
+              mimeType: s.data.split(';')[0].split(':')[1]
+            }
+          }));
+
           const analysisResponse = await callAiWithRetry(() => ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: [
-              {
-                inlineData: {
-                  data: audioData.split(',')[1],
-                  mimeType: audioData.split(';')[0].split(':')[1]
-                }
-              },
-              { text: `The user wants to clone a voice with this description: "${voiceDescription}". Analyze the provided audio and combine its technical characteristics (tone, pitch, energy, accent) with the user's description to create a final technical profile for a TTS engine. Keep it under 60 words.` }
+              ...audioParts,
+              { text: `The user wants to clone a voice with this description: "${voiceDescription}". Analyze the provided audio samples and combine their technical characteristics (tone, pitch, energy, accent) with the user's description to create a final technical profile for a TTS engine. Focus on consistency across samples. Keep it under 60 words.` }
             ]
           }));
           if (analysisResponse.text) {
             voiceDescription = analysisResponse.text;
           }
-        } catch (analysisError) {
-          console.error("Error analyzing voice audio:", analysisError);
+        } catch (analysisError: any) {
+          const msg = analysisError?.message || String(analysisError);
+          if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+            console.log("Voice analysis aborted during generation (expected)");
+          } else {
+            console.error("Error analyzing voice audio:", analysisError);
+          }
           // Fallback to original description
         }
       }
 
       if (mode === 'cloning' || selectedCustomVoice) {
-        systemInstruction = `You are a voice cloning engine. Clone the following voice style: ${voiceDescription}. Speak the script exactly.`;
+        systemInstruction = `You are a high-fidelity Voice DNA cloning engine. Clone the following Voice DNA profile: ${voiceDescription}. Speak the script exactly as written, maintaining the unique vocal identity provided in the DNA.`;
       } else {
-        systemInstruction = `Generate a professional DJ drop script and speak it.`;
+        systemInstruction = `Generate a professional DJ drop script and speak it using the selected voice profile.`;
       }
 
       if (audioQuality === 'studio') {
@@ -491,6 +619,11 @@ export default function CreateDrop() {
         playPcm(bytes.buffer);
       }
     } catch (error: any) {
+      const msg = error?.message || String(error);
+      if (msg.includes("signal is aborted") || msg.includes("AbortError")) {
+        console.log("Generation aborted (expected)");
+        return;
+      }
       console.error("Error generating drop:", error);
       const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
       if (errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("429")) {
@@ -696,8 +829,8 @@ export default function CreateDrop() {
               mode === 'cloning' ? "bg-red-600 text-white" : "text-neutral-500 hover:text-white"
             )}
           >
-            <Wand2 className="w-3 h-3" />
-            Voice Cloning
+            <Activity className="w-3 h-3" />
+            Voice DNA Cloning
           </button>
         </div>
       </div>
@@ -751,6 +884,43 @@ export default function CreateDrop() {
                     ))}
                   </div>
                 </div>
+
+                <div className="space-y-4 pt-4 border-t border-white/5">
+                  <label className="block text-sm font-bold uppercase tracking-wider text-neutral-500">Emotional Tag</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['Energetic', 'Authoritative', 'Deep', 'Raspy', 'Excited', 'Aggressive'] as const).map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => setEmotionalTag(tag)}
+                        className={cn(
+                          "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                          emotionalTag === tag 
+                            ? "bg-red-600 border-red-600 text-white" 
+                            : "bg-black/40 border-white/10 text-neutral-500 hover:border-white/20"
+                        )}
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t border-white/5">
+                  <label className="block text-sm font-bold uppercase tracking-wider text-neutral-500">Sound Effects</label>
+                  <select
+                    value={soundEffect}
+                    onChange={(e) => setSoundEffect(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-neutral-300 focus:outline-none focus:border-red-600"
+                  >
+                    <option value="None">No Sound Effects</option>
+                    <option value="Airhorn">Airhorn</option>
+                    <option value="Vinyl Scratch">Vinyl Scratch</option>
+                    <option value="Explosion">Explosion</option>
+                    <option value="Echo">Heavy Echo</option>
+                    <option value="Reverb">Deep Reverb</option>
+                    <option value="Laser">Laser Shot</option>
+                  </select>
+                </div>
               </motion.div>
             ) : (
               <motion.div
@@ -762,50 +932,64 @@ export default function CreateDrop() {
               >
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Voice Name</label>
+                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Voice DNA Name</label>
                     <input
                       type="text"
                       value={voiceName}
                       onChange={(e) => setVoiceName(e.target.value)}
-                      placeholder="e.g. My Jamaican MC"
+                      placeholder="e.g. My DNA Voice"
                       className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-sm focus:outline-none focus:border-red-600 transition-colors"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">
-                      Voice Description
-                      <span className="ml-2 text-[10px] font-normal normal-case text-neutral-600">(Guides the AI's tone and style)</span>
+                    <label className="flex items-center justify-between text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">
+                      <div className="flex items-center gap-2">
+                        Voice DNA Profile
+                        <span className="text-[10px] font-normal normal-case text-neutral-600">(AI-generated DNA description)</span>
+                      </div>
+                      {isAnalyzingVoice && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-red-500 font-black uppercase animate-pulse">
+                          <Sparkles className="w-3 h-3" />
+                          AI Analyzing...
+                        </div>
+                      )}
                     </label>
-                    <textarea
-                      value={cloningPrompt}
-                      onChange={(e) => setCloningPrompt(e.target.value)}
-                      placeholder="Describe the voice style... (e.g. 'Deep, raspy, high-energy Jamaican MC with a slight echo')"
-                      className="w-full h-24 bg-black/40 border border-white/10 rounded-2xl p-4 text-sm focus:outline-none focus:border-red-600 transition-colors resize-none"
-                    />
+                    <div className="relative">
+                      <textarea
+                        value={cloningPrompt}
+                        onChange={(e) => setCloningPrompt(e.target.value)}
+                        placeholder="Describe the voice style... (e.g. 'Deep, raspy, high-energy Jamaican MC with a slight echo')"
+                        className={cn(
+                          "w-full h-24 bg-black/40 border border-white/10 rounded-2xl p-4 text-sm focus:outline-none focus:border-red-600 transition-all resize-none",
+                          isAnalyzingVoice && "opacity-50 cursor-wait"
+                        )}
+                      />
+                      {isAnalyzingVoice && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <Loader2 className="w-6 h-6 text-red-500 animate-spin" />
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Voice Reference Samples (Upload or Record)</label>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
                       <input
                         type="file"
                         ref={fileInputRef}
                         onChange={handleFileUpload}
                         accept="audio/*"
+                        multiple
                         className="hidden"
                       />
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className={cn(
-                          "py-4 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all",
-                          uploadedAudio && !isRecording
-                            ? "bg-green-600/10 border-green-600/50 text-green-500" 
-                            : "bg-black/40 border-white/10 text-neutral-500 hover:border-white/20"
-                        )}
+                        className="py-4 rounded-2xl border-2 border-dashed bg-black/40 border-white/10 text-neutral-500 hover:border-white/20 flex flex-col items-center justify-center gap-2 transition-all"
                       >
                         <Upload className="w-5 h-5" />
-                        <span className="text-[10px] font-black uppercase">Upload File</span>
+                        <span className="text-[10px] font-black uppercase">Upload Samples</span>
                       </button>
 
                       <button
@@ -826,63 +1010,174 @@ export default function CreateDrop() {
                         )}
                         <Mic className={cn("w-5 h-5 relative z-10", isRecording && "animate-pulse")} />
                         <span className="text-[10px] font-black uppercase relative z-10">
-                          {isRecording ? `Recording (${recordingTime}s)` : 'Record Live'}
+                          {isRecording ? `Recording (${recordingTime}s)` : 'Record Sample'}
                         </span>
                       </button>
                     </div>
-                    {uploadedAudio && !isRecording && (
-                      <div className="mt-2 flex items-center justify-center gap-2">
-                        <div className="flex items-center gap-2 text-green-500">
-                          <CheckCircle className="w-4 h-4" />
-                          <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[150px]">
-                            {uploadedFileName || 'Reference Ready'}
-                          </span>
+                    {isRecording && (
+                      <div className="mb-4 bg-black/60 p-4 rounded-2xl border border-red-600/30">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-black uppercase text-red-500 animate-pulse">Live Input</span>
+                          <span className="text-[10px] font-mono text-neutral-400">{recordingTime}s</span>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => analyzeVoice()}
-                            disabled={isAnalyzingVoice}
-                            className="p-1.5 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-500 transition-all flex items-center gap-1"
-                            title="AI Analyze Voice"
-                          >
-                            {isAnalyzingVoice ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Sparkles className="w-3 h-3" />
-                            )}
-                            <span className="text-[8px] font-black uppercase">AI Analyze</span>
-                          </button>
-                          <button
-                            onClick={playReference}
-                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-all"
-                            title="Play Reference"
-                          >
-                            <Volume2 className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={clearReference}
-                            className="p-1.5 rounded-lg bg-white/5 hover:bg-red-600/10 text-neutral-400 hover:text-red-500 transition-all"
-                            title="Clear Reference"
-                          >
-                            <Plus className="w-3 h-3 rotate-45" />
-                          </button>
-                        </div>
+                        <LiveWaveform stream={recordingStream} />
                       </div>
                     )}
+
+                    {/* Samples List */}
+                    <div className="space-y-3 mb-6">
+                      <AnimatePresence mode="popLayout">
+                        {samples.map((sample) => (
+                          <motion.div
+                            key={sample.id}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-neutral-900/80 border border-white/10 rounded-2xl p-4 flex flex-col gap-3"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3 overflow-hidden">
+                                <div className="w-8 h-8 rounded-lg bg-red-600/20 flex items-center justify-center shrink-0">
+                                  <Music2 className="w-4 h-4 text-red-500" />
+                                </div>
+                                <span className="text-xs font-bold truncate text-neutral-300">{sample.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => setPlayingSampleId(playingSampleId === sample.id ? null : sample.id)}
+                                  className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 transition-colors"
+                                >
+                                  {playingSampleId === sample.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                </button>
+                                <button
+                                  onClick={() => removeSample(sample.id)}
+                                  className="p-2 rounded-lg hover:bg-red-600/10 text-neutral-500 hover:text-red-500 transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {playingSampleId === sample.id && (
+                              <div className="px-2">
+                                <WaveformPlayer 
+                                  audioUrl={sample.data} 
+                                  isPlaying={true} 
+                                  onTogglePlay={() => setPlayingSampleId(null)} 
+                                />
+                              </div>
+                            )}
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                      
+                      {samples.length > 0 && (
+                        <button
+                          onClick={() => analyzeVoice()}
+                          disabled={isAnalyzingVoice}
+                          className="w-full py-3 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-500 text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-red-600/20"
+                        >
+                          {isAnalyzingVoice ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                          Re-Analyze All Samples
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Fine-Tuning Section */}
+                  <div className="bg-black/40 rounded-[2rem] p-6 border border-white/5 space-y-6">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sliders className="w-4 h-4 text-red-500" />
+                      <h3 className="text-xs font-black uppercase tracking-widest text-neutral-400">Voice Fine-Tuning</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2 group relative">
+                            <label className="text-[10px] font-black uppercase text-neutral-500">Pitch</label>
+                            <Info className="w-3 h-3 text-neutral-600 cursor-help" />
+                            <div className="absolute bottom-full left-0 mb-2 w-48 p-2 bg-neutral-800 text-[10px] text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 border border-white/10 shadow-xl">
+                              Adjusts the highness or lowness of the voice tone. Higher values make the voice sound more high-pitched.
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-mono text-red-500">{pitch.toFixed(2)}x</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="0.5" 
+                          max="2.0" 
+                          step="0.05" 
+                          value={pitch}
+                          onChange={(e) => setPitch(parseFloat(e.target.value))}
+                          className="w-full accent-red-600 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2 group relative">
+                            <label className="text-[10px] font-black uppercase text-neutral-500">Speed</label>
+                            <Info className="w-3 h-3 text-neutral-600 cursor-help" />
+                            <div className="absolute bottom-full left-0 mb-2 w-48 p-2 bg-neutral-800 text-[10px] text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 border border-white/10 shadow-xl">
+                              Adjusts how fast or slow the voice speaks. 1.0x is normal speed.
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-mono text-red-500">{speed.toFixed(2)}x</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="0.5" 
+                          max="2.0" 
+                          step="0.05" 
+                          value={speed}
+                          onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                          className="w-full accent-red-600 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] font-black uppercase text-neutral-500">Background Effects</label>
+                      <div className="flex flex-wrap gap-2">
+                        {(['reverb', 'echo', 'flanger', 'wahWah'] as const).map((effect) => (
+                          <button
+                            key={effect}
+                            onClick={() => setEffects(prev => ({ ...prev, [effect]: !prev[effect] }))}
+                            className={cn(
+                              "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border",
+                              effects[effect] 
+                                ? "bg-red-600 border-red-600 text-white" 
+                                : "bg-black/40 border-white/10 text-neutral-500 hover:border-white/20"
+                            )}
+                          >
+                            {effect}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-4 gap-2">
                     <button
                       onClick={addClonedVoice}
-                      disabled={!uploadedAudio && !cloningPrompt}
-                      className="col-span-3 bg-white text-black py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-neutral-200 transition-all disabled:opacity-50"
+                      disabled={samples.length === 0 && !cloningPrompt}
+                      className="col-span-2 bg-white text-black py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-neutral-200 transition-all disabled:opacity-50"
                     >
-                      <Plus className="w-3 h-3" />
-                      Save Cloned Voice
+                      <Activity className="w-3 h-3" />
+                      Clone Voice DNA
                     </button>
                     <button
-                      onClick={() => previewVoice(voiceName || "New Clone", cloningPrompt, uploadedAudio || undefined)}
-                      disabled={isPreviewing !== null || (!uploadedAudio && !cloningPrompt)}
+                      onClick={saveVoiceToProfile}
+                      disabled={isSavingVoice || (samples.length === 0 && !cloningPrompt)}
+                      className="bg-neutral-800 text-white py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-neutral-700 transition-all disabled:opacity-50"
+                    >
+                      {isSavingVoice ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      Save DNA
+                    </button>
+                    <button
+                      onClick={() => previewVoice(voiceName || "New Clone", cloningPrompt, samples)}
+                      disabled={isPreviewing !== null || (samples.length === 0 && !cloningPrompt)}
                       className="bg-red-600 text-white py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-red-700 transition-all disabled:opacity-50"
                     >
                       {isPreviewing === (voiceName || "New Clone") ? (
@@ -894,7 +1189,7 @@ export default function CreateDrop() {
                   </div>
 
                   <p className="text-[10px] text-neutral-500 italic">
-                    Example: "Deep, raspy, high-energy Jamaican MC"
+                    Tip: Upload 3-5 samples of 10-30s each for best results.
                   </p>
                 </div>
               </motion.div>
@@ -935,7 +1230,7 @@ export default function CreateDrop() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          previewVoice(v.name, v.description, v.audioData);
+                          previewVoice(v.name, v.description, v.samples);
                         }}
                         disabled={isPreviewing === v.name}
                         className={cn(
@@ -953,7 +1248,7 @@ export default function CreateDrop() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            deleteVoice(v.name);
+                            deleteVoice(v);
                           }}
                           className="p-2 text-neutral-500 hover:text-red-500 transition-colors"
                         >

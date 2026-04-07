@@ -20,7 +20,9 @@ import {
   CreditCard,
   Key,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  ArrowRight,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -35,6 +37,7 @@ import OrdersList from './components/OrdersList';
 import AIChatbot from './components/AIChatbot';
 import TextDropOrder from './components/TextDropOrder';
 import AdminDashboard from './components/AdminDashboard';
+import HeroBackground from './components/HeroBackground';
 
 export default function App() {
   const [user, loading] = useAuthState(auth);
@@ -244,40 +247,45 @@ function Home({ user }: { user: any }) {
   return (
     <div className="space-y-20">
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-red-900/20 to-black border border-white/10 p-8 md:p-20 text-center">
+      <section className="relative overflow-hidden rounded-[3rem] bg-black border border-white/10 p-8 md:p-24 text-center min-h-[600px] flex items-center justify-center">
+        <HeroBackground />
+        
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative z-10 max-w-3xl mx-auto"
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="relative z-10 max-w-4xl mx-auto"
         >
-          <span className="inline-block px-4 py-1 rounded-full bg-red-600/20 text-red-500 text-sm font-bold mb-6 border border-red-600/30 uppercase tracking-widest">Premium DJ Services</span>
-          <h1 className="text-5xl md:text-7xl font-black mb-6 tracking-tighter leading-none uppercase italic">
-            Elevate Your <span className="text-red-600">Sound</span> & <span className="text-red-600">Style</span>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-red-600/10 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] mb-8 border border-red-600/20"
+          >
+            <Sparkles className="w-3 h-3" />
+            The Future of DJ Drops
+          </motion.div>
+          
+          <h1 className="text-6xl md:text-8xl font-black mb-8 tracking-tighter leading-[0.9] uppercase italic">
+            Elevate Your <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-red-400">Sound</span> & <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-red-600">Style</span>
           </h1>
-          <p className="text-neutral-400 text-lg md:text-xl mb-10 max-w-2xl mx-auto leading-relaxed">
-            Get high-quality AI-powered DJ drops, voice clones, and professional promotional posters. Powered by DJ RAPHO.
+          
+          <p className="text-neutral-400 text-lg md:text-xl mb-12 max-w-2xl mx-auto leading-relaxed font-medium">
+            Professional AI-powered DJ drops, voice cloning, and high-impact promotional posters. 
+            <span className="text-white"> Built for DJs who demand the best.</span>
           </p>
+          
           <div className="flex flex-wrap gap-4 justify-center">
-            <Link to="/create-drop" className="bg-red-600 hover:bg-red-700 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20">
+            <Link to="/create-drop" className="group relative bg-red-600 hover:bg-red-700 px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-red-600/20 flex items-center gap-3">
               Create DJ Drop
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>
-            <Link to="/text-order" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
+            <Link to="/text-order" className="bg-white/5 hover:bg-white/10 border border-white/10 px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all hover:scale-105 active:scale-95 backdrop-blur-md">
               Manual Order
-            </Link>
-            <Link to="/photo-generator" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
-              Photo Generator
-            </Link>
-            <Link to="/posters" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
-              Design Poster
             </Link>
           </div>
         </motion.div>
-        
-        {/* Background Decorative Elements */}
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-20">
-          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-red-600 rounded-full blur-[120px]" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-red-900 rounded-full blur-[120px]" />
-        </div>
       </section>
 
       {/* Featured Promotion */}

@@ -37,11 +37,42 @@ export default function AIChatbot() {
         },
       });
 
-      const response = await chat.sendMessage({ message: userMessage });
+      const callWithRetry = async (fn: () => Promise<any>, maxRetries = 3): Promise<any> => {
+        let lastError: any;
+        for (let i = 0; i <= maxRetries; i++) {
+          try {
+            return await fn();
+          } catch (err: any) {
+            lastError = err;
+            const msg = err?.message || String(err);
+            const isRetryable = msg.includes("aborted") || 
+                               msg.includes("signal") || 
+                               msg.includes("429") || 
+                               msg.includes("RESOURCE_EXHAUSTED") ||
+                               msg.includes("fetch failed") ||
+                               msg.includes("deadline exceeded");
+
+            if (i < maxRetries && isRetryable) {
+              const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw lastError;
+      };
+
+      const response = await callWithRetry(() => chat.sendMessage({ message: userMessage }));
       setMessages(prev => [...prev, { role: 'model', text: response.text || "I'm feeling a bit out of sync. Try again?" }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Chat error:", error);
-      setMessages(prev => [...prev, { role: 'model', text: "Sorry, I hit a snag. Check your connection or try again later!" }]);
+      const errorMsg = error?.message || String(error);
+      if (errorMsg.includes("aborted")) {
+        setMessages(prev => [...prev, { role: 'model', text: "Connection was interrupted. Please try sending your message again!" }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'model', text: "Sorry, I hit a snag. Check your connection or try again later!" }]);
+      }
     } finally {
       setIsLoading(false);
     }

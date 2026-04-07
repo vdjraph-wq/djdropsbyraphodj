@@ -79,6 +79,14 @@ service cloud.firestore {
              isValidDateString(data.createdAt);
     }
 
+    function isValidClonedVoice(data) {
+      return data.keys().hasAll(['userId', 'name', 'description', 'createdAt']) &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 2000 &&
+             isValidDateString(data.createdAt);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -89,6 +97,13 @@ service cloud.firestore {
       allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
                     ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
       allow delete: if isAdmin();
+
+      match /cloned_voices/{voiceId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidClonedVoice(request.resource.data) && request.resource.data.userId == userId;
+        allow update: if isOwner(userId) && isValidClonedVoice(request.resource.data) && request.resource.data.userId == userId;
+        allow delete: if isOwner(userId) || isAdmin();
+      }
     }
 
     match /orders/{orderId} {

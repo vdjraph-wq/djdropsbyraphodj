@@ -31,6 +31,19 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "type", "status", "amount"]
+    },
+    "cloned_voices": {
+      "title": "Cloned Voice",
+      "description": "A saved cloned voice profile.",
+      "type": "object",
+      "properties": {
+        "voiceId": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string", "description": "The technical profile of the voice" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "description", "createdAt"]
     }
   },
   "firestore": {
@@ -41,6 +54,10 @@
     "/orders/{orderId}": {
       "schema": "orders",
       "description": "Order tracking documents"
+    },
+    "/users/{uid}/cloned_voices/{voiceId}": {
+      "schema": "cloned_voices",
+      "description": "User's saved cloned voices"
     }
   }
 }
