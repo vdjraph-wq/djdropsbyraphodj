@@ -17,9 +17,13 @@ import {
   X,
   LogOut,
   Phone,
-  CreditCard
+  CreditCard,
+  Key,
+  ShieldCheck,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { cn } from './lib/utils';
 
 // Components (to be created)
 import CreateDrop from './components/CreateDrop';
@@ -29,10 +33,36 @@ import PhotoGenerator from './components/PhotoGenerator';
 import OrderForm from './components/OrderForm';
 import OrdersList from './components/OrdersList';
 import AIChatbot from './components/AIChatbot';
+import TextDropOrder from './components/TextDropOrder';
+import AdminDashboard from './components/AdminDashboard';
 
 export default function App() {
   const [user, loading] = useAuthState(auth);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if ((window as any).aistudio?.hasSelectedApiKey) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        setHasApiKey(hasKey);
+      }
+    };
+    checkApiKey();
+    // Check periodically in case they select it in another tab or dialog
+    const interval = setInterval(checkApiKey, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleActivateKeys = async () => {
+    if ((window as any).aistudio?.openSelectKey) {
+      await (window as any).aistudio.openSelectKey();
+      // Assume success as per instructions to avoid race conditions
+      setHasApiKey(true);
+    }
+  };
+
+  const isAdmin = user?.email === 'vdjraph@gmail.com';
 
   useEffect(() => {
     if (user) {
@@ -80,11 +110,29 @@ export default function App() {
 
               {/* Desktop Menu */}
               <div className="hidden md:flex items-center gap-8">
+                <button 
+                  onClick={handleActivateKeys}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all border",
+                    hasApiKey 
+                      ? "bg-green-600/10 border-green-600/30 text-green-500" 
+                      : "bg-amber-600/10 border-amber-600/30 text-amber-500 hover:bg-amber-600/20"
+                  )}
+                >
+                  {hasApiKey ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                  {hasApiKey ? "API ACTIVE" : "ACTIVATE API"}
+                </button>
                 <Link to="/create-drop" className="hover:text-red-500 transition-colors">Create Drop</Link>
+                <Link to="/text-order" className="hover:text-red-500 transition-colors">Manual Order</Link>
                 <Link to="/photo-generator" className="hover:text-red-500 transition-colors">Photo Generator</Link>
                 <Link to="/posters" className="hover:text-red-500 transition-colors">Poster Maker</Link>
                 <Link to="/live" className="hover:text-red-500 transition-colors">Live AI</Link>
                 <Link to="/orders" className="hover:text-red-500 transition-colors">My Orders</Link>
+                {isAdmin && (
+                  <Link to="/admin" className="bg-red-600/10 text-red-500 px-4 py-1.5 rounded-full font-black uppercase tracking-widest text-[10px] border border-red-600/20 hover:bg-red-600/20 transition-all">
+                    Admin Panel
+                  </Link>
+                )}
                 {user ? (
                   <div className="flex items-center gap-4">
                     <img src={user.photoURL || ''} alt="" className="w-8 h-8 rounded-full border border-white/20" />
@@ -118,11 +166,30 @@ export default function App() {
                 className="md:hidden bg-black border-b border-white/10 overflow-hidden"
               >
                   <div className="px-4 pt-2 pb-6 space-y-4">
+                    <button 
+                      onClick={() => { handleActivateKeys(); setIsMenuOpen(false); }}
+                      className={cn(
+                        "w-full flex items-center justify-between p-4 rounded-xl text-sm font-bold border",
+                        hasApiKey 
+                          ? "bg-green-600/10 border-green-600/30 text-green-500" 
+                          : "bg-amber-600/10 border-amber-600/30 text-amber-500"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        {hasApiKey ? <ShieldCheck className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+                        {hasApiKey ? "API KEYS ACTIVE" : "ACTIVATE API KEYS"}
+                      </div>
+                      {!hasApiKey && <Key className="w-4 h-4" />}
+                    </button>
                     <Link to="/create-drop" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Create Drop</Link>
+                    <Link to="/text-order" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Manual Order</Link>
                     <Link to="/photo-generator" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Photo Generator</Link>
                     <Link to="/posters" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Poster Maker</Link>
                     <Link to="/live" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">Live AI</Link>
                     <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5">My Orders</Link>
+                    {isAdmin && (
+                      <Link to="/admin" onClick={() => setIsMenuOpen(false)} className="block text-lg py-2 border-b border-white/5 text-red-500 font-black">Admin Panel</Link>
+                    )}
                     {user ? (
                     <button onClick={() => { logout(); setIsMenuOpen(false); }} className="w-full text-left text-red-500 py-2">Sign Out</button>
                   ) : (
@@ -139,11 +206,13 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home user={user} />} />
             <Route path="/create-drop" element={<CreateDrop />} />
+            <Route path="/text-order" element={<TextDropOrder />} />
             <Route path="/live" element={<LiveAssistantPage />} />
             <Route path="/posters" element={<PosterMaker />} />
             <Route path="/photo-generator" element={<PhotoGenerator />} />
             <Route path="/orders" element={<OrdersList user={user} />} />
             <Route path="/order/:type" element={<OrderForm user={user} />} />
+            {isAdmin && <Route path="/admin" element={<AdminDashboard />} />}
           </Routes>
         </main>
 
@@ -188,9 +257,12 @@ function Home({ user }: { user: any }) {
           <p className="text-neutral-400 text-lg md:text-xl mb-10 max-w-2xl mx-auto leading-relaxed">
             Get high-quality AI-powered DJ drops, voice clones, and professional promotional posters. Powered by DJ RAPHO.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-wrap gap-4 justify-center">
             <Link to="/create-drop" className="bg-red-600 hover:bg-red-700 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20">
               Create DJ Drop
+            </Link>
+            <Link to="/text-order" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
+              Manual Order
             </Link>
             <Link to="/photo-generator" className="bg-white/10 hover:bg-white/20 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95 backdrop-blur-sm">
               Photo Generator
@@ -226,14 +298,14 @@ function Home({ user }: { user: any }) {
               Premium <span className="text-red-600">DJ Drops</span> & Graphics
             </h2>
             <p className="text-neutral-300 max-w-xl text-sm sm:text-lg font-medium leading-relaxed">
-              Get professional DJ drops, logos, posters, and mix intros starting from only <span className="text-white font-bold">150sh</span>. Quality service by DJ RAPHO.
+              Get professional DJ drops, 3D logos, and animations starting from only <span className="text-white font-bold">70sh</span>. Quality service by DJ RAPHO.
             </p>
           </div>
         </div>
       </section>
 
       {/* Services Grid */}
-      <section className="grid md:grid-cols-4 gap-8">
+      <section className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-8">
         <ServiceCard 
           icon={<Mic className="w-8 h-8 text-red-500" />}
           title="AI Voice Drops"
@@ -241,15 +313,27 @@ function Home({ user }: { user: any }) {
           link="/create-drop"
         />
         <ServiceCard 
-          icon={<ImageIcon className="w-8 h-8 text-red-500" />}
-          title="AI Photo Generator"
-          description="Create professional DJ posters and logos instantly with AI."
-          link="/photo-generator"
+          icon={<MessageSquare className="w-8 h-8 text-red-500" />}
+          title="Manual Studio Drops"
+          description="Order professional studio recordings directly from DJ RAPHO for only 150sh."
+          link="/text-order"
         />
         <ServiceCard 
           icon={<ImageIcon className="w-8 h-8 text-red-500" />}
-          title="Poster & Logo Design"
-          description="Instant professional posters and logos for your events and brand identity."
+          title="3D Logo Design"
+          description="Get a professional 3D logo for your brand for only 70sh."
+          link="/order/3d_logo"
+        />
+        <ServiceCard 
+          icon={<Music className="w-8 h-8 text-red-500" />}
+          title="3D Logo Animation"
+          description="Animate your logo for only 250sh. Perfect for video intros."
+          link="/order/3d_logo_animation"
+        />
+        <ServiceCard 
+          icon={<ImageIcon className="w-8 h-8 text-red-500" />}
+          title="Poster Design"
+          description="Instant professional posters for your events and brand identity."
           link="/posters"
         />
         <ServiceCard 

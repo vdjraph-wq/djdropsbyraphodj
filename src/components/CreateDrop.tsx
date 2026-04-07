@@ -1,15 +1,114 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { Mic, Loader2, Volume2, ArrowRight, Sparkles, Download, Wand2, Activity, Upload, Plus, CheckCircle } from 'lucide-react';
+import { Mic, Loader2, Volume2, ArrowRight, Sparkles, Download, Wand2, Activity, Upload, Plus, CheckCircle, MessageSquare, Trash2, Play, Pause, Sliders, Music2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import WaveSurfer from 'wavesurfer.js';
+
+interface AudioSample {
+  id: string;
+  data: string;
+  name: string;
+  blob: Blob;
+}
+
+const WaveformPlayer = ({ audioUrl, isPlaying, onTogglePlay }: { audioUrl: string, isPlaying: boolean, onTogglePlay: () => void }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const wavesurferRef = useRef<WaveSurfer | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const wavesurfer = WaveSurfer.create({
+      container: containerRef.current,
+      waveColor: '#4b5563',
+      progressColor: '#ef4444',
+      cursorColor: '#ef4444',
+      barWidth: 2,
+      barRadius: 3,
+      responsive: true,
+      height: 40,
+      normalize: true,
+      partialRender: true
+    });
+
+    wavesurfer.load(audioUrl);
+    wavesurferRef.current = wavesurfer;
+
+    wavesurfer.on('finish', () => {
+      if (isPlaying) onTogglePlay();
+    });
+
+    return () => {
+      wavesurfer.destroy();
+    };
+  }, [audioUrl]);
+
+  useEffect(() => {
+    if (wavesurferRef.current) {
+      if (isPlaying) {
+        wavesurferRef.current.play();
+      } else {
+        wavesurferRef.current.pause();
+      }
+    }
+  }, [isPlaying]);
+
+  return <div ref={containerRef} className="w-full" />;
+};
+
+const LiveWaveform = ({ stream }: { stream: MediaStream | null }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationRef = useRef<number>(null);
+
+  useEffect(() => {
+    if (!stream || !canvasRef.current) return;
+
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d')!;
+
+    const draw = () => {
+      animationRef.current = requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const barWidth = (canvas.width / bufferLength) * 2.5;
+      let barHeight;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        barHeight = (dataArray[i] / 255) * canvas.height;
+        ctx.fillStyle = `rgb(239, 68, 68)`; // red-500
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+        x += barWidth + 1;
+      }
+    };
+
+    draw();
+
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      audioContext.close();
+    };
+  }, [stream]);
+
+  return <canvas ref={canvasRef} width={300} height={40} className="w-full h-10 rounded-lg opacity-50" />;
+};
 
 export default function CreateDrop() {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [voice, setVoice] = useState<string>('RAPHO');
-  const [customVoices, setCustomVoices] = useState<{name: string, description: string, audioData?: string}[]>([
+  const [customVoices, setCustomVoices] = useState<{name: string, description: string, audioData?: string, samples?: AudioSample[]}[]>([
     { name: 'RAPHO', description: 'Deep male voice, authoritative, similar to Wigman style, high energy' }
   ]);
   const [mode, setMode] = useState<'standard' | 'cloning'>('standard');
@@ -17,12 +116,14 @@ export default function CreateDrop() {
   const [cloningPrompt, setCloningPrompt] = useState('Deep, energetic, Jamaican style');
   const [audioQuality, setAudioQuality] = useState<'standard' | 'studio'>('standard');
   const [sampleRate, setSampleRate] = useState<number>(24000);
-  const [uploadedAudio, setUploadedAudio] = useState<string | null>(null);
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [samples, setSamples] = useState<AudioSample[]>([]);
+  const [playingSampleId, setPlayingSampleId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{text: string, type: 'error' | 'success' | 'info'} | null>(null);
   const [lastGeneratedAudio, setLastGeneratedAudio] = useState<Blob | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [pitch, setPitch] = useState(1.0);
+  const [speed, setSpeed] = useState(1.0);
   const [effects, setEffects] = useState({
     reverb: false,
     echo: false,
@@ -34,12 +135,15 @@ export default function CreateDrop() {
   const navigate = useNavigate();
 
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
+  const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setRecordingStream(stream);
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -54,10 +158,19 @@ export default function CreateDrop() {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         const reader = new FileReader();
         reader.onloadend = () => {
-          setUploadedAudio(reader.result as string);
+          const base64 = reader.result as string;
+          const newSample: AudioSample = {
+            id: Math.random().toString(36).substr(2, 9),
+            data: base64,
+            name: `Recording ${samples.length + 1}`,
+            blob: audioBlob
+          };
+          setSamples(prev => [...prev, newSample]);
+          analyzeVoice(newSample.data);
         };
         reader.readAsDataURL(audioBlob);
         stream.getTracks().forEach(track => track.stop());
+        setRecordingStream(null);
       };
 
       mediaRecorder.start();
@@ -84,29 +197,45 @@ export default function CreateDrop() {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFileName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUploadedAudio(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          const newSample: AudioSample = {
+            id: Math.random().toString(36).substr(2, 9),
+            data: base64,
+            name: file.name,
+            blob: file
+          };
+          setSamples(prev => {
+            const updated = [...prev, newSample];
+            if (updated.length === 1) analyzeVoice(base64);
+            return updated;
+          });
+        };
+        reader.readAsDataURL(file);
+      });
     }
   };
 
+  const removeSample = (id: string) => {
+    setSamples(prev => prev.filter(s => s.id !== id));
+  };
+
   const addClonedVoice = () => {
-    if (!uploadedAudio && !cloningPrompt) return;
+    if (samples.length === 0 && !cloningPrompt) return;
     const name = voiceName.trim() || `Cloned ${customVoices.length + 1}`;
     setCustomVoices(prev => [...prev, { 
       name, 
       description: cloningPrompt,
-      audioData: uploadedAudio || undefined 
+      audioData: samples[0]?.data || undefined,
+      samples: [...samples]
     }]);
     setVoice(name);
     setMode('standard');
-    setUploadedAudio(null);
-    setUploadedFileName(null);
+    setSamples([]);
     setVoiceName('');
     setCloningPrompt('');
     setStatusMessage({ text: `Voice "${name}" cloned successfully!`, type: 'success' });
@@ -129,6 +258,50 @@ export default function CreateDrop() {
     if (!uploadedAudio) return;
     const audio = new Audio(uploadedAudio);
     audio.play().catch(e => console.error("Reference playback failed:", e));
+  };
+
+  const analyzeVoice = async (audioData?: string) => {
+    const dataToAnalyze = audioData || samples[0]?.data;
+    if (!dataToAnalyze) return;
+    setIsAnalyzingVoice(true);
+    setStatusMessage({ text: "AI is analyzing your voice reference...", type: 'info' });
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      // If multiple samples, we can send them all for a more robust analysis
+      const audioParts = samples.length > 0 
+        ? samples.slice(0, 3).map(s => ({
+            inlineData: {
+              data: s.data.split(',')[1],
+              mimeType: s.data.split(';')[0].split(':')[1]
+            }
+          }))
+        : [{
+            inlineData: {
+              data: dataToAnalyze.split(',')[1],
+              mimeType: dataToAnalyze.split(';')[0].split(':')[1]
+            }
+          }];
+
+      const response = await callAiWithRetry(() => ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          ...audioParts,
+          { text: "Analyze these audio samples and describe the voice's characteristics (pitch, tone, energy, accent, style) in a concise way (under 40 words). This description will be used as a prompt for a TTS engine to clone the voice. Focus on technical attributes that remain consistent across samples." }
+        ]
+      }));
+      
+      if (response.text) {
+        setCloningPrompt(response.text.trim());
+        setStatusMessage({ text: "Voice analyzed and description updated!", type: 'success' });
+        setTimeout(() => setStatusMessage(null), 3000);
+      }
+    } catch (error) {
+      console.error("Voice analysis error:", error);
+      setStatusMessage({ text: "Failed to analyze voice. Please try again.", type: 'error' });
+    } finally {
+      setIsAnalyzingVoice(false);
+    }
   };
 
   const [isPreviewing, setIsPreviewing] = useState<string | null>(null);
@@ -209,7 +382,7 @@ export default function CreateDrop() {
         for (let i = 0; i < binary.length; i++) {
           bytes[i] = binary.charCodeAt(i);
         }
-        const wavBlob = createWavBlob(bytes.buffer, sampleRate);
+        const wavBlob = createWavBlob(bytes.buffer, 24000);
         const url = URL.createObjectURL(wavBlob);
         const audio = new Audio(url);
         audio.play().catch(e => console.error("Audio playback failed:", e));
@@ -242,8 +415,19 @@ export default function CreateDrop() {
 
       let voiceDescription = selectedCustomVoice?.description || cloningPrompt;
 
+      // Add fine-tuning instructions to the description
+      const fineTuning = `Adjust the voice to have: Pitch: ${pitch > 1 ? 'higher' : pitch < 1 ? 'lower' : 'normal'}, Speed: ${speed > 1 ? 'faster' : speed < 1 ? 'slower' : 'normal'}.`;
+      const effectsList = Object.entries(effects)
+        .filter(([_, active]) => active)
+        .map(([name]) => name)
+        .join(', ');
+      
+      const effectsInstruction = effectsList ? ` Apply background effects: ${effectsList}.` : '';
+      
+      voiceDescription = `${voiceDescription}. ${fineTuning}${effectsInstruction}`;
+
       // If audio is provided, analyze it first to get a better description for the TTS model
-      const audioData = selectedCustomVoice?.audioData || uploadedAudio;
+      const audioData = selectedCustomVoice?.audioData || (samples.length > 0 ? samples[0].data : null);
       if (audioData) {
         try {
           const analysisResponse = await callAiWithRetry(() => ai.models.generateContent({
@@ -301,7 +485,7 @@ export default function CreateDrop() {
         }
         
         // Create WAV blob for downloading
-        const wavBlob = createWavBlob(bytes.buffer, sampleRate);
+        const wavBlob = createWavBlob(bytes.buffer, 24000);
         setLastGeneratedAudio(wavBlob);
         
         playPcm(bytes.buffer);
@@ -348,14 +532,18 @@ export default function CreateDrop() {
     return new Blob([buffer], { type: 'audio/wav' });
   };
 
-  const playPcm = (buffer: ArrayBuffer) => {
+  const playPcm = async (buffer: ArrayBuffer) => {
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
     const pcmData = new Int16Array(buffer);
     const floatData = new Float32Array(pcmData.length);
     for (let i = 0; i < pcmData.length; i++) {
       floatData[i] = pcmData[i] / 32768;
     }
-    const audioBuffer = audioCtx.createBuffer(1, floatData.length, sampleRate);
+    // AI TTS output is always 24kHz
+    const audioBuffer = audioCtx.createBuffer(1, floatData.length, 24000);
     audioBuffer.getChannelData(0).set(floatData);
     
     const source = audioCtx.createBufferSource();
@@ -598,7 +786,7 @@ export default function CreateDrop() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Voice Reference (Upload or Record)</label>
+                    <label className="block text-sm font-bold mb-3 uppercase tracking-wider text-neutral-500">Voice Reference Samples (Upload or Record)</label>
                     <div className="grid grid-cols-2 gap-4">
                       <input
                         type="file"
@@ -651,6 +839,19 @@ export default function CreateDrop() {
                           </span>
                         </div>
                         <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => analyzeVoice()}
+                            disabled={isAnalyzingVoice}
+                            className="p-1.5 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-500 transition-all flex items-center gap-1"
+                            title="AI Analyze Voice"
+                          >
+                            {isAnalyzingVoice ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Sparkles className="w-3 h-3" />
+                            )}
+                            <span className="text-[8px] font-black uppercase">AI Analyze</span>
+                          </button>
                           <button
                             onClick={playReference}
                             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-all"
@@ -932,17 +1133,38 @@ export default function CreateDrop() {
             </div>
           </div>
 
-          {/* Tips */}
-          <div className="bg-neutral-900/50 border border-white/5 p-6 rounded-3xl">
-            <h4 className="font-bold mb-2 flex items-center gap-2 text-sm">
-              <Mic className="w-4 h-4 text-red-500" />
-              Writing Tips
-            </h4>
-            <ul className="text-xs text-neutral-500 space-y-2">
-              <li>• Keep it short and punchy (under 15 words)</li>
-              <li>• Use brackets for pronunciation: "DJ RAPHO [RAH-FOH]"</li>
-              <li>• Add "The Mix", "In the Building", or "Official" for hype</li>
-            </ul>
+          {/* Tips & Manual Order */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="bg-neutral-900/50 border border-white/5 p-6 rounded-3xl">
+              <h4 className="font-bold mb-2 flex items-center gap-2 text-sm">
+                <Mic className="w-4 h-4 text-red-500" />
+                Writing Tips
+              </h4>
+              <ul className="text-xs text-neutral-500 space-y-2">
+                <li>• Keep it short and punchy (under 15 words)</li>
+                <li>• Use brackets for pronunciation: "DJ RAPHO [RAH-FOH]"</li>
+                <li>• Add "The Mix", "In the Building", or "Official" for hype</li>
+              </ul>
+            </div>
+
+            <div className="bg-red-600/5 border border-red-600/10 p-6 rounded-3xl flex flex-col justify-between">
+              <div>
+                <h4 className="font-bold mb-2 flex items-center gap-2 text-sm text-red-500">
+                  <MessageSquare className="w-4 h-4" />
+                  Manual Studio Order
+                </h4>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Can't get the AI to sound exactly right? Order a manual studio recording directly from DJ RAPHO for only <span className="text-white font-bold">KES 150</span>.
+                </p>
+              </div>
+              <Link 
+                to="/text-order"
+                className="mt-4 inline-flex items-center justify-center gap-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+              >
+                Order Manual Drop
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
           </div>
         </div>
       </div>

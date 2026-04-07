@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { ImageIcon, Loader2, Download, Send, Layout, Maximize, Sparkles } from 'lucide-react';
+import { ImageIcon, Loader2, Download, Send, Layout, Maximize, Sparkles, CheckCircle, Activity, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -11,18 +11,44 @@ export default function PosterMaker() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '9:16' | '16:9' | '4:3'>('1:1');
   const [animationType, setAnimationType] = useState<'none' | 'pulse' | 'float' | 'glow' | 'slide'>('none');
+  const [statusMessage, setStatusMessage] = useState<{text: string, type: 'error' | 'success' | 'info'} | null>(null);
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<'poster' | 'logo'>('poster');
+
+  const callAiWithRetry = async (fn: () => Promise<any>, maxRetries = 2) => {
+    let lastError: any;
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+        const isRateLimit = errorStr.includes("RESOURCE_EXHAUSTED") || 
+                           errorStr.includes("429") || 
+                           error?.status === 429 ||
+                           error?.code === 429;
+        
+        if (isRateLimit && i < maxRetries) {
+          setStatusMessage({ text: "AI is busy. Retrying automatically...", type: 'info' });
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, i + 1) * 1000));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError;
+  };
 
   const generatePoster = async () => {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     setGeneratedImage(null);
+    setStatusMessage(null);
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
+      const response = await callAiWithRetry(() => ai.models.generateContent({
         model: 'gemini-3.1-flash-image-preview',
         contents: {
           parts: [
@@ -37,17 +63,25 @@ export default function PosterMaker() {
             imageSize: "1K"
           },
         },
-      });
+      }));
 
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData) {
           const base64EncodeString: string = part.inlineData.data;
           setGeneratedImage(`data:image/png;base64,${base64EncodeString}`);
+          setStatusMessage({ text: "Design generated successfully!", type: 'success' });
+          setTimeout(() => setStatusMessage(null), 3000);
           break;
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating poster:", error);
+      const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+      if (errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("429")) {
+        setStatusMessage({ text: "AI is currently at capacity. Please try again in a moment.", type: 'error' });
+      } else {
+        setStatusMessage({ text: "Error generating design. Please try again.", type: 'error' });
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -86,6 +120,28 @@ export default function PosterMaker() {
       <div className="grid lg:grid-cols-2 gap-12 items-start">
         {/* Controls */}
         <div className="space-y-8">
+          <AnimatePresence>
+            {statusMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className={cn(
+                  "p-4 rounded-2xl text-sm font-bold flex items-center gap-3 border",
+                  statusMessage.type === 'error' ? "bg-red-600/10 border-red-600 text-red-500" :
+                  statusMessage.type === 'success' ? "bg-green-600/10 border-green-600 text-green-500" :
+                  "bg-blue-600/10 border-blue-600 text-blue-500"
+                )}
+              >
+                {statusMessage.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
+                {statusMessage.text}
+                <button onClick={() => setStatusMessage(null)} className="ml-auto opacity-50 hover:opacity-100">
+                  <Plus className="w-4 h-4 rotate-45" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="bg-neutral-900 p-8 rounded-3xl border border-white/5 space-y-6">
             <div>
               <label className="block text-sm font-bold mb-4 uppercase tracking-wider text-neutral-500">Poster Details</label>

@@ -16,8 +16,8 @@ export default function OrderForm({ user }: { user: any }) {
   const [mpesaCode, setMpesaCode] = useState('');
   const [step, setStep] = useState<'form' | 'verifying' | 'success'>('form');
 
-  const amount = type === 'voice_drop' ? 500 : type === 'poster' ? 1000 : 1500;
-  const typeLabel = type === 'voice_drop' ? 'AI Voice Drop' : type === 'poster' ? 'Premium Poster' : 'Professional Logo';
+  const amount = type === 'voice_drop' ? 150 : type === 'poster' ? 1000 : type === '3d_logo' ? 70 : type === '3d_logo_animation' ? 250 : 1500;
+  const typeLabel = type === 'voice_drop' ? 'AI Voice Drop' : type === 'poster' ? 'Premium Poster' : type === '3d_logo' ? '3D Logo' : type === '3d_logo_animation' ? '3D Logo Animation' : 'Professional Logo';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +44,7 @@ export default function OrderForm({ user }: { user: any }) {
       
       // Auto-redirect to WhatsApp after 5 seconds
       setTimeout(() => {
-        const message = `Hello DJ RAPHO, I just placed an order for a ${typeLabel}.\nOrder Details: ${script}\nM-Pesa Code: ${mpesaCode}`;
+        const message = `Hello DJ RAPHO, I just placed an order for a ${typeLabel}.\nOrder Details: ${script}\nM-Pesa Code: ${mpesaCode}\n\nI am sending my M-Pesa message for verification now.`;
         window.open(`https://wa.me/254745260364?text=${encodeURIComponent(message)}`, '_blank');
         navigate('/orders');
       }, 5000);
@@ -115,7 +115,7 @@ export default function OrderForm({ user }: { user: any }) {
           <div className="flex flex-col gap-4">
             <button
               onClick={() => {
-                const message = `Hello DJ RAPHO, I just placed an order for a ${typeLabel}.\nOrder Details: ${script}\nM-Pesa Code: ${mpesaCode}`;
+                const message = `Hello DJ RAPHO, I just placed an order for a ${typeLabel}.\nOrder Details: ${script}\nM-Pesa Code: ${mpesaCode}\n\nI am sending my M-Pesa message for verification now.`;
                 window.open(`https://wa.me/254745260364?text=${encodeURIComponent(message)}`, '_blank');
               }}
               className="w-full bg-green-600 hover:bg-green-700 py-5 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-lg shadow-green-600/20"
@@ -171,6 +171,7 @@ export default function OrderForm({ user }: { user: any }) {
               <li>Enter Number: <span className="text-white font-bold">0745260364</span></li>
               <li>Enter Amount: <span className="text-white font-bold">KES {amount}</span></li>
               <li>Copy the M-Pesa Transaction Code</li>
+              <li><span className="text-white font-bold uppercase">Critical:</span> Send your M-Pesa message to DJ RAPHO on WhatsApp to verify.</li>
             </ol>
           </div>
         </div>
